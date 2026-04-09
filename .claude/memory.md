@@ -39,6 +39,20 @@
 
 **Plan Status:** ✅ Confirmed — implementation in progress
 
+### 2026-04-09 (Phase 3)
+**Status:** ✅ COMPLETED — committed to branch `phase/3-crawling-engine`
+
+**Files created:**
+- `scraper/rate_limiter.py` — asyncio `RateLimiter`, per-domain lock, monotonic clock, `reset()` để test
+- `scraper/proxy.py` — `ProxyManager`: round-robin, `DEAD_THRESHOLD=3`, `RECOVERY_THRESHOLD=1`, password masking trong log, thread-safe `RLock`
+- `scraper/retry.py` — `RetryHandler`: exponential backoff (base=1s, max=30s, jitter ±20%), `RetryableHTTPError` (429/5xx), `NonRetryableError` passthrough, `max_retries=3`
+- `scraper/spider.py` — `PriceSpider`: user-agent rotation pool (3 UAs), `playwright` meta cho `requires_js`, `errback` mark proxy dead, `parse()` delegate sang `parser.extract_price()`, mọi lỗi → `ErrorResult`
+
+**Key design decisions:**
+- `NonRetryableHTTPStatus` = {404, 410} → ErrorResult ngay, không retry
+- `RetryableHTTPStatus` = {429, 500, 502, 503, 504} → retry với backoff
+- Rate limiter dùng `asyncio.Lock` (không phải threading) vì Scrapy+Playwright chạy trong asyncio event loop
+
 ### 2026-04-09 (Phase 2)
 **Status:** ✅ COMPLETED — committed to branch `phase/2-config-scheduling`
 
@@ -118,6 +132,20 @@ project_claw/
 - **MEDIUM:** CSS/XPath selectors break on site redesign
 - **MEDIUM:** Docker image size (~500MB with Playwright)
 - **MEDIUM:** AES key management in production
+
+---
+
+## Quy Tắc Test (BẮT BUỘC)
+
+> Mỗi phase **phải có test và test phải pass** trước khi bắt đầu phase tiếp theo.
+
+Thứ tự bắt buộc cho mỗi phase:
+1. Tạo branch `phase/N-<tên>`
+2. Implement các file của phase
+3. Viết test cho các file đó trong `tests/`
+4. Chạy `pytest tests/` — phải pass hết
+5. Commit (code + test cùng nhau hoặc riêng)
+6. Mới được bắt đầu phase tiếp theo
 
 ---
 
