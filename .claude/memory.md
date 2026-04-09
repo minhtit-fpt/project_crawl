@@ -39,6 +39,16 @@
 
 **Plan Status:** ✅ Confirmed — implementation in progress
 
+### 2026-04-09 (Phase 2)
+**Status:** ✅ COMPLETED — committed to branch `phase/2-config-scheduling`
+
+**Files created:**
+- `scraper/config/sites.yaml` — khai báo sites: name, base_url (với `{sku}` placeholder), skus list, selectors (CSS + XPath fallback), requires_js, rate_limit_seconds
+- `scraper/config/settings.py` — `load_sites()` validate YAML → `SiteConfig` frozen dataclass; `SCRAPY_SETTINGS` với Playwright handler, chromium headless, anti-detection args
+- `scraper/scheduler.py` — `Scheduler` class: `build_jobs()` expand site×SKU → `CrawlJob` list; `collect_result()` / `run()` interface; `CrawlResult` + `ErrorResult` dataclasses với UTC timestamp; `SpiderRunner` injected để testable
+
+**Key design:** `SpiderRunner` là injected dependency (không hardcode Scrapy trong scheduler) → dễ unit test không cần Scrapy process thật.
+
 ### 2026-04-09 (Phase 1)
 **Status:** ✅ COMPLETED — committed to branch `phase/1-foundation`
 

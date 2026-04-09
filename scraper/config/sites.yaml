@@ -1,0 +1,38 @@
+# Price Crawler — Site Configuration
+#
+# Each entry defines one target website. SKUs listed here will be expanded
+# into individual crawl jobs by the scheduler.
+#
+# Fields:
+#   name              Human-readable site label (used in output & logs)
+#   base_url          URL template — {sku} is replaced with each product code
+#   skus              List of product codes to crawl on this site
+#   selectors:
+#     price_css       Primary CSS selector for the price element
+#     price_xpath     Fallback XPath selector (used if CSS yields nothing)
+#   requires_js       true = render via Playwright; false = plain Scrapy request
+#   rate_limit_seconds  Minimum delay (seconds) between requests to this domain
+
+sites:
+  - name: "DemoStore"
+    base_url: "https://demo-store.example.com/product/{sku}"
+    skus:
+      - "SKU-001"
+      - "SKU-002"
+      - "SKU-003"
+    selectors:
+      price_css: "span.price"
+      price_xpath: "//span[contains(@class,'price')]"
+    requires_js: false
+    rate_limit_seconds: 2
+
+  - name: "JSStore"
+    base_url: "https://js-store.example.com/item?code={sku}"
+    skus:
+      - "PROD-100"
+      - "PROD-200"
+    selectors:
+      price_css: "[data-testid='product-price']"
+      price_xpath: "//*[@data-testid='product-price']"
+    requires_js: true
+    rate_limit_seconds: 3
