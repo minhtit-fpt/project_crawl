@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "command": "echo \"[REMINDER] Session ending — ensure .claude/memory.md and CLAUDE.md are up to date with any decisions, structural changes, or workflow changes made this session.\"",
+        "description": "Remind to persist session changes to memory and CLAUDE.md"
+      }
+    ]
+  }
+}
