@@ -37,7 +37,18 @@
 - Output: Formatted table to terminal (Price, SKU, Source, Timestamp, Status)
 - Deployment: Docker (multi-stage, non-root user, Chromium only)
 
-**Plan Status:** ✅ Plan presented, awaiting user confirmation to implement
+**Plan Status:** ✅ Confirmed — implementation in progress
+
+### 2026-04-09 (Phase 1)
+**Status:** ✅ COMPLETED — committed to branch `phase/1-foundation`
+
+**Files created:**
+- `requirements.txt` — pinned deps: scrapy 2.11.2, scrapy-playwright 0.0.40, playwright 1.44.0, pycryptodome 3.20.0, python-dotenv 1.0.1, pyyaml 6.0.2, tabulate 0.9.0, pytest + cov + asyncio
+- `.env.example` — template với AES_SECRET_KEY, AES_IV, PROXY_LIST, LOG_LEVEL, DATABASE_URL
+- `.gitignore` — .env, __pycache__, .scrapy, venv, IDE, logs
+- `security/__init__.py`
+- `security/env_loader.py` — load_config() → AppConfig (frozen dataclass), validate hex key/IV lengths, parse PROXY_LIST
+- `security/encryption.py` — Encryptor class, AES-256-CBC, PKCS7 padding, base64 output, thread-safe (new cipher per call)
 
 ---
 
