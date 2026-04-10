@@ -39,6 +39,74 @@
 
 **Plan Status:** ✅ Confirmed — implementation in progress
 
+### 2026-04-10 (Session 2 — Debug & SKU Resolver)
+**Branch:** `phase/5-integration`
+**Status:** ✅ COMPLETED — 179 tests pass
+
+**Vấn đề đã fix:**
+
+1. **`scrapy-playwright` chưa cài** — `requirements.txt` pin version cũ không tương thích Python 3.14. Fix: `pip install scrapy-playwright` (cài 0.0.46), update requirements sang `>=` thay vì pin cứng.
+
+2. **`start_requests()` deprecated** (Scrapy 2.13+) — đổi sang `async def start()` trong `spider.py`.
+
+3. **asyncio teardown noise** ("Task was destroyed but it is pending") — suppress bằng `logging.getLogger("asyncio").setLevel(CRITICAL)` trong `main.py` sau `basicConfig`.
+
+4. **Selector sai cho dienmayxanh.com** — `.after-price` không tồn tại. Debug bằng cách dump rendered HTML (Playwright networkidle) ra file → dùng Opus đọc HTML → tìm selector đúng: `.box_servicepack div.active span b` (giá của gói đang active).
+
+5. **Playwright timeout khi wait_for_selector** — bỏ `wait_for_selector`, dùng `wait_for_load_state("networkidle")` thay thế.
+
+**Feature mới: SKU Resolver (resolve mã ngắn → URL)**
+
+Thay vì nhập full slug (`nagakawa-inverter-1-hp-nis-c09r2t28`), user chỉ cần nhập mã ngắn (`NIS-C09R2T28`).
+
+**Files thêm/sửa:**
+- `scraper/resolver.py` *(MỚI)* — `resolve_sku_to_url(sku, site)`: mode `direct` (thay {sku} vào base_url) hoặc `search` (GET search_url → parse CSS → lấy href đầu tiên)
+- `scraper/config/settings.py` — thêm `SearchSelectors` dataclass, thêm 3 field optional vào `SiteConfig`: `sku_mode`, `search_url`, `search_selectors`
+- `scraper/scheduler.py` — `build_jobs()` đổi return type thành `tuple[list[CrawlJob], list[ErrorResult]]`; `run()` merge resolve errors vào results
+- `scraper/spider.py` — import `PageMethod`, thêm `wait_for_load_state("networkidle")` cho JS pages, `start()` async
+- `main.py` — suppress asyncio logger noise
+- `scraper/config/sites.yaml` — dùng mã ngắn + `sku_mode: search`
+- `tests/test_resolver.py` *(MỚI)* — 11 tests
+- `tests/test_scheduler.py` — fix 5 tests do `build_jobs()` đổi signature
+- `tests/test_main.py` — fix mock `load_config` thay vì rely vào `clear=True`
+- `requirements.txt` — đổi pin cứng sang `>=` cho scrapy/scrapy-playwright/playwright
+- `README.md` *(MỚI)* — hướng dẫn sử dụng đầy đủ
+- `docs/usage.md` *(MỚI)* — hướng dẫn chi tiết
+
+**Config dienmayxanh.com đã verified:**
+```yaml
+search_url: "https://www.dienmayxanh.com/tim-kiem?key={sku}"
+search_selectors:
+  result_link_css: "a.main-contain"
+price_css: ".box_servicepack div.active span b"
+```
+Kết quả test thực tế: NIS-C18R2T28=10.490.000₫, NIS-C09R2T28=5.490.000₫, MAFA-09CDN8=5.190.000₫
+
+**Known issues tồn tại:**
+- `RuntimeError: Event loop is closed` ở cuối run — harmless, từ scrapy-playwright internal thread, không ảnh hưởng kết quả
+- Python 3.14 chưa được scrapy-playwright support chính thức nhưng hoạt động được với 0.0.46
+
+---
+
+### 2026-04-10 (Phase 5)
+**Status:** ✅ COMPLETED — committed to branch `phase/5-integration`
+
+**Files created:**
+- `main.py` — 7-step pipeline: load .env → parse CLI → load sites.yaml → init components → Scheduler.run(spider_runner) → print_results
+- Exit codes: `0`=all OK, `1`=crash/config error, `2`=partial errors
+- CLI: `--config`, `--encrypt`, `--log-level`
+- `spider_runner` closure injects `CrawlerProcess` vào `Scheduler.run()` → Scheduler vẫn testable độc lập
+- `tests/test_main.py` — 13 tests: arg parsing, env/config errors, encrypt wiring, exception handling
+
+### 2026-04-10 (Phase 4)
+**Status:** ✅ COMPLETED — committed to branch `phase/4-parsing-output`
+
+**Files created:**
+- `scraper/parser.py` — `extract_price()` CSS→XPath fallback; `_parse_price_text()` USD/EUR/VND formats; strip non-numeric TRƯỚC khi detect separator
+- `scraper/output.py` — `print_results()` aligned table; `format_results()` string; optional `Encryptor`; error rows em-dash + full error
+- `tests/test_parser.py` 31 tests + `tests/test_output.py` 20 tests
+- **Bug fix:** VND "1.500.000đ" cần strip currency suffix trước khi detect dot-thousands
+
 ### 2026-04-09 (Phase 3)
 **Status:** ✅ COMPLETED — committed to branch `phase/3-crawling-engine`
 
@@ -122,6 +190,9 @@ project_claw/
 | Proxy | Round-robin with dead-proxy tracking | Balance load, handle failures |
 | Retry | Exponential backoff, max 3 | Handle transient failures, skip 404s |
 | Docker base | python:3.12-slim + Chromium only | Minimize image size |
+| SKU resolution | Search page + CSS selector | Tự chủ, không phụ thuộc Google/API bên ngoài |
+| Playwright wait | `networkidle` thay vì `wait_for_selector` | Selector cụ thể gây timeout; networkidle ổn định hơn |
+| asyncio noise | `logging.getLogger("asyncio").setLevel(CRITICAL)` | scrapy-playwright dùng thread loop riêng, không thể patch exception handler |
 
 ---
 
@@ -173,14 +244,10 @@ Quy trình mỗi phase:
 ---
 
 ## Next Steps
-1. Confirm plan → `git init` + tạo branch `phase/1-foundation`
-2. Phase 1: requirements.txt, .env.example, env_loader.py, encryption.py
-3. Phase 2: sites.yaml, settings.py, scheduler.py
-4. Phase 3: rate_limiter.py, proxy.py, retry.py, spider.py
-5. Phase 4: parser.py, output.py
-6. Phase 5: main.py (integration)
-7. Phase 6: Dockerfile, docker-compose.yml
-8. Phase 7: Tests (80%+ coverage)
+- ~~Phase 1–5: DONE~~ ✅
+- Phase 6: Dockerfile, docker-compose.yml
+- Phase 7: Tests (80%+ coverage)
+- Cân nhắc: thêm persistent cache cho SKU→URL resolution (tránh gọi search API lặp lại)
 
 ---
 
