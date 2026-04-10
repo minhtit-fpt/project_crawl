@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from scraper.config.settings import SiteConfig, SelectorConfig
+from scraper.resolver import resolve_sku_to_url
 
 logger = logging.getLogger(__name__)
 
@@ -78,12 +79,32 @@ class Scheduler:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def build_jobs(self) -> list[CrawlJob]:
-        """Expand all site × SKU combinations into a flat CrawlJob list."""
+    def build_jobs(self) -> tuple[list[CrawlJob], list[ErrorResult]]:
+        """Expand all site × SKU combinations into a flat CrawlJob list.
+
+        For sku_mode="search" sites, resolves each SKU to a full URL first.
+        SKUs whose URL cannot be resolved are returned as ErrorResults so
+        they still appear in the final output table.
+
+        Returns:
+            (jobs, resolve_errors) — jobs ready to crawl, plus any pre-crawl errors.
+        """
         jobs: list[CrawlJob] = []
+        resolve_errors: list[ErrorResult] = []
+
         for site in self._site_configs:
             for sku in site.skus:
-                url = site.base_url.replace("{sku}", sku)
+                url = resolve_sku_to_url(sku, site)
+                if url is None:
+                    logger.warning("Could not resolve URL for SKU=%s site=%s", sku, site.name)
+                    resolve_errors.append(
+                        make_error_result(
+                            sku=sku,
+                            source=site.name,
+                            error="ResolveError: could not find product URL",
+                        )
+                    )
+                    continue
                 jobs.append(
                     CrawlJob(
                         site_name=site.name,
@@ -94,8 +115,9 @@ class Scheduler:
                         rate_limit_seconds=site.rate_limit_seconds,
                     )
                 )
+
         logger.info("Built %d crawl jobs from %d sites", len(jobs), len(self._site_configs))
-        return jobs
+        return jobs, resolve_errors
 
     def collect_result(self, outcome: CrawlOutcome) -> None:
         """Called by the spider to register a completed job outcome."""
@@ -118,7 +140,8 @@ class Scheduler:
             List of CrawlResult and ErrorResult objects.
         """
         self._results.clear()
-        jobs = self.build_jobs()
+        jobs, resolve_errors = self.build_jobs()
+        self._results.extend(resolve_errors)  # pre-populate failed resolutions
 
         if not jobs:
             logger.warning("No crawl jobs generated — check sites.yaml SKU lists")

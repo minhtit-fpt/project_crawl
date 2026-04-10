@@ -15,12 +15,17 @@
 
 sites:
   - name: "DienmayXanh"
-    # SKU = phần cuối của URL sản phẩm (slug đầy đủ)
-    # Ví dụ: https://www.dienmayxanh.com/may-lanh/nagakawa-inverter-1-hp-nis-c09r2t28
-    #   → SKU = nagakawa-inverter-1-hp-nis-c09r2t28
+    # sku_mode: "search" — nhập mã sản phẩm ngắn, crawler tự tìm URL đầy đủ
+    # Ví dụ: NIS-C09R2T28 → https://www.dienmayxanh.com/may-lanh/nagakawa-inverter-1-hp-nis-c09r2t28
     base_url: "https://www.dienmayxanh.com/may-lanh/{sku}"
+    sku_mode: "search"
+    search_url: "https://www.dienmayxanh.com/tim-kiem?key={sku}"
+    search_selectors:
+      result_link_css: "a.main-contain"
     skus:
-      - "nagakawa-inverter-2-hp-nis-c18r2t28"
+      - "NIS-C18R2T28"
+      - "NIS-C09R2T28"
+      - "MAFA-09CDN8"
     selectors:
       price_css: ".box_servicepack div.active span b"
       price_xpath: "//div[contains(@class,'box_servicepack')]//div[contains(@class,'active')]/span/b"

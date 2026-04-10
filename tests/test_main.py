@@ -74,8 +74,9 @@ class TestMainEnvErrors:
             code = main(["--config", str(tmp_path / "nonexistent.yaml")])
         assert code == 1
 
-    def test_missing_env_prints_error_to_stderr(self, tmp_path, capsys):
-        with patch.dict(os.environ, {}, clear=True):
+    def test_missing_env_prints_error_to_stderr(self, capsys):
+        # Patch load_config directly so .env file on disk does not interfere
+        with patch("main.load_config", side_effect=EnvironmentError("Missing AES_SECRET_KEY")):
             main([])
         captured = capsys.readouterr()
         assert "ERROR" in captured.err

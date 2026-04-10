@@ -36,19 +36,22 @@ def _site(name: str = "Shop", skus: list[str] | None = None, requires_js: bool =
 class TestBuildJobs:
     def test_expands_single_site_two_skus(self):
         scheduler = Scheduler([_site(skus=["A", "B"])])
-        jobs = scheduler.build_jobs()
+        jobs, errors = scheduler.build_jobs()
         assert len(jobs) == 2
+        assert errors == []
 
     def test_job_url_has_sku_substituted(self):
         scheduler = Scheduler([_site(name="Store", skus=["X99"])])
-        job = scheduler.build_jobs()[0]
+        jobs, _ = scheduler.build_jobs()
+        job = jobs[0]
         assert "X99" in job.url
         assert "{sku}" not in job.url
 
     def test_job_fields_correct(self):
         site = _site(name="MyShop", skus=["SKU-1"], requires_js=True)
         scheduler = Scheduler([site])
-        job = scheduler.build_jobs()[0]
+        jobs, _ = scheduler.build_jobs()
+        job = jobs[0]
         assert job.site_name == "MyShop"
         assert job.sku == "SKU-1"
         assert job.requires_js is True
@@ -59,11 +62,11 @@ class TestBuildJobs:
             _site(name="A", skus=["1", "2", "3"]),
             _site(name="B", skus=["4", "5"]),
         ]
-        jobs = Scheduler(sites).build_jobs()
+        jobs, _ = Scheduler(sites).build_jobs()
         assert len(jobs) == 5
 
     def test_all_jobs_are_crawl_job_instances(self):
-        jobs = Scheduler([_site()]).build_jobs()
+        jobs, _ = Scheduler([_site()]).build_jobs()
         assert all(isinstance(j, CrawlJob) for j in jobs)
 
     def test_empty_site_list_raises(self):

@@ -26,6 +26,12 @@ class SelectorConfig:
 
 
 @dataclass(frozen=True)
+class SearchSelectors:
+    """Selectors used to parse search result pages."""
+    result_link_css: str   # CSS selector that returns <a> tags of product results
+
+
+@dataclass(frozen=True)
 class SiteConfig:
     name: str
     base_url: str
@@ -33,6 +39,11 @@ class SiteConfig:
     selectors: SelectorConfig
     requires_js: bool
     rate_limit_seconds: float
+    # sku_mode="direct": substitute {sku} into base_url (default, backward-compat)
+    # sku_mode="search": resolve short code via search_url first
+    sku_mode: str = "direct"
+    search_url: Optional[str] = None
+    search_selectors: Optional[SearchSelectors] = None
 
 
 # ── Scrapy base settings ───────────────────────────────────────────────────────
@@ -111,14 +122,32 @@ def _parse_site(entry: dict, idx: int) -> SiteConfig:
     selectors_raw = entry.get("selectors")
     requires_js = bool(entry.get("requires_js", False))
     rate_limit = float(entry.get("rate_limit_seconds", 1.0))
+    sku_mode = entry.get("sku_mode", "direct")
 
     _validate_url(base_url, label)
     if not skus:
         raise ValueError(f"{label}: 'skus' list must not be empty")
     if "{sku}" not in base_url:
         raise ValueError(f"{label}: 'base_url' must contain '{{sku}}' placeholder")
+    if sku_mode not in ("direct", "search"):
+        raise ValueError(f"{label}: 'sku_mode' must be 'direct' or 'search', got {sku_mode!r}")
 
     selectors = _parse_selectors(selectors_raw, label)
+
+    # Parse optional search config (required when sku_mode="search")
+    search_url: Optional[str] = None
+    search_selectors: Optional[SearchSelectors] = None
+    if sku_mode == "search":
+        search_url = entry.get("search_url")
+        if not search_url:
+            raise ValueError(f"{label}: 'search_url' is required when sku_mode='search'")
+        if "{sku}" not in search_url:
+            raise ValueError(f"{label}: 'search_url' must contain '{{sku}}' placeholder")
+        _validate_url(search_url.replace("{sku}", "placeholder"), label)
+        search_selectors_raw = entry.get("search_selectors")
+        if not search_selectors_raw:
+            raise ValueError(f"{label}: 'search_selectors' is required when sku_mode='search'")
+        search_selectors = _parse_search_selectors(search_selectors_raw, label)
 
     return SiteConfig(
         name=name,
@@ -127,6 +156,9 @@ def _parse_site(entry: dict, idx: int) -> SiteConfig:
         selectors=selectors,
         requires_js=requires_js,
         rate_limit_seconds=rate_limit,
+        sku_mode=sku_mode,
+        search_url=search_url,
+        search_selectors=search_selectors,
     )
 
 
@@ -136,6 +168,13 @@ def _parse_selectors(raw: object, label: str) -> SelectorConfig:
     css = _require_str(raw, "price_css", f"{label}.selectors")
     xpath = _require_str(raw, "price_xpath", f"{label}.selectors")
     return SelectorConfig(price_css=css, price_xpath=xpath)
+
+
+def _parse_search_selectors(raw: object, label: str) -> SearchSelectors:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label}: 'search_selectors' must be a mapping with 'result_link_css'")
+    css = _require_str(raw, "result_link_css", f"{label}.search_selectors")
+    return SearchSelectors(result_link_css=css)
 
 
 def _require_str(d: dict, key: str, label: str) -> str:
