@@ -8,6 +8,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Phase Workflow (BẮT BUỘC)
+
+Thứ tự bắt buộc cho **mỗi phase**:
+1. Tạo branch `phase/N-<tên>`
+2. Implement các file
+3. Viết test trong `tests/`
+4. Chạy `pytest tests/` — phải pass trước khi tiếp tục
+5. Commit code + test
+6. Mới được bắt đầu phase tiếp theo
+
+---
+
 ## Git Workflow
 
 **Bắt buộc:** Tạo branch mới trước khi bắt đầu mỗi phase.
