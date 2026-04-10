@@ -1,16 +1,23 @@
 """
 Terminal output formatter.
 
-Accepts a list of CrawlResult / ErrorResult and prints a formatted table
-to stdout. Optionally encrypts SKU and Price columns when an Encryptor is
-supplied (--encrypt flag).
+Accepts a list of CrawlResult / ErrorResult objects and prints a formatted
+table to stdout. Optionally encrypts the price and SKU fields when an
+Encryptor is supplied (--encrypt flag).
 
-Output columns: SKU | Price | Source | Timestamp (UTC) | Status
+Output columns:
+  SKU | Price | Source | Timestamp (UTC) | Status
+
+Usage:
+    from scraper.output import print_results
+    from scraper.scheduler import CrawlResult, ErrorResult
+
+    print_results(results)
+    print_results(results, encryptor=enc)   # encrypt price + SKU columns
 """
 
 from __future__ import annotations
 
-import io
 import sys
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
@@ -20,7 +27,10 @@ from scraper.scheduler import CrawlOutcome, CrawlResult, ErrorResult
 if TYPE_CHECKING:
     from security.encryption import Encryptor
 
+# Column headers
 _HEADERS = ["SKU", "Price", "Source", "Timestamp (UTC)", "Status"]
+
+# Column widths (minimum)
 _COL_WIDTHS = [20, 15, 20, 25, 30]
 
 
@@ -29,12 +39,13 @@ def print_results(
     encryptor: Optional["Encryptor"] = None,
     file=None,
 ) -> None:
-    """Print all crawl results as a formatted table.
+    """Print all crawl results as a formatted table to stdout (or file).
 
     Args:
         results:   List of CrawlResult / ErrorResult objects.
-        encryptor: If provided, SKU and Price columns are AES-encrypted.
-        file:      Output stream (default: sys.stdout).
+        encryptor: Optional Encryptor — if provided, SKU and Price columns
+                   are encrypted before printing.
+        file:      Output stream (default: sys.stdout). Override in tests.
     """
     if file is None:
         file = sys.stdout
@@ -55,7 +66,8 @@ def format_results(
     results: list[CrawlOutcome],
     encryptor: Optional["Encryptor"] = None,
 ) -> str:
-    """Return the formatted table as a string."""
+    """Return formatted table as a string (useful for logging or file output)."""
+    import io
     buf = io.StringIO()
     print_results(results, encryptor=encryptor, file=buf)
     return buf.getvalue()
@@ -64,6 +76,7 @@ def format_results(
 # ── Private helpers ────────────────────────────────────────────────────────────
 
 def _format_row(result: CrawlOutcome, encryptor: Optional["Encryptor"]) -> list[str]:
+    """Convert a CrawlResult or ErrorResult into a list of column strings."""
     if isinstance(result, CrawlResult):
         sku = result.sku
         price = f"{result.price:.2f}"
@@ -72,14 +85,14 @@ def _format_row(result: CrawlOutcome, encryptor: Optional["Encryptor"]) -> list[
         status = result.status
     else:
         sku = result.sku
-        price = "\u2014"   # em dash
+        price = "—"
         source = result.source
         timestamp = _fmt_timestamp(result.timestamp)
         status = f"Error: {result.error}"
 
     if encryptor is not None:
         sku = encryptor.encrypt(sku)
-        if price != "\u2014":
+        if price != "—":
             price = encryptor.encrypt(price)
 
     return [sku, price, source, timestamp, status]
@@ -90,6 +103,8 @@ def _fmt_timestamp(ts: datetime) -> str:
 
 
 def _print_table(rows: list[list[str]], file) -> None:
+    """Print a simple aligned table with a header and separator line."""
+    # Compute column widths: max of header width, min width, and all row values
     widths = list(_COL_WIDTHS)
     for i, header in enumerate(_HEADERS):
         widths[i] = max(widths[i], len(header))
