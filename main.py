@@ -56,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Suppress harmless "Task destroyed but pending" asyncio teardown noise
+    # from scrapy-playwright shutdown on Python 3.12+ / Windows.
+    logging.getLogger("asyncio").setLevel(logging.CRITICAL)
     logger = logging.getLogger(__name__)
 
     # ── Step 3: load sites config ──────────────────────────────────────────────

@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Generator
+from typing import Any, Callable
 
 import scrapy
 from scrapy import signals
 from scrapy.http import Response
+from scrapy_playwright.page import PageMethod
 
 from scraper.config.settings import SelectorConfig
 from scraper.proxy import ProxyManager
@@ -91,7 +92,8 @@ class PriceSpider(scrapy.Spider):
 
     # ── Scrapy lifecycle ───────────────────────────────────────────────────────
 
-    def start_requests(self) -> Generator[scrapy.Request, None, None]:
+    async def start(self):  # type: ignore[override]
+        """Scrapy 2.13+ async entry point (replaces deprecated start_requests)."""
         for job in self._jobs:
             yield self._build_request(job)
 
@@ -182,7 +184,11 @@ class PriceSpider(scrapy.Spider):
         if job.requires_js:
             meta["playwright"] = True
             meta["playwright_include_page"] = False
-            meta["playwright_page_methods"] = []
+            # Wait for the price element to appear after JS renders the page.
+            # Falls back gracefully if the selector never appears (timeout).
+            meta["playwright_page_methods"] = [
+                PageMethod("wait_for_load_state", "networkidle"),
+            ]
 
         request = scrapy.Request(
             url=job.url,

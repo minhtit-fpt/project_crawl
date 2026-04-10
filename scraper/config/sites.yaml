@@ -14,25 +14,15 @@
 #   rate_limit_seconds  Minimum delay (seconds) between requests to this domain
 
 sites:
-  - name: "DemoStore"
-    base_url: "https://demo-store.example.com/product/{sku}"
+  - name: "DienmayXanh"
+    # SKU = phần cuối của URL sản phẩm (slug đầy đủ)
+    # Ví dụ: https://www.dienmayxanh.com/may-lanh/nagakawa-inverter-1-hp-nis-c09r2t28
+    #   → SKU = nagakawa-inverter-1-hp-nis-c09r2t28
+    base_url: "https://www.dienmayxanh.com/may-lanh/{sku}"
     skus:
-      - "SKU-001"
-      - "SKU-002"
-      - "SKU-003"
+      - "nagakawa-inverter-2-hp-nis-c18r2t28"
     selectors:
-      price_css: "span.price"
-      price_xpath: "//span[contains(@class,'price')]"
-    requires_js: false
-    rate_limit_seconds: 2
-
-  - name: "JSStore"
-    base_url: "https://js-store.example.com/item?code={sku}"
-    skus:
-      - "PROD-100"
-      - "PROD-200"
-    selectors:
-      price_css: "[data-testid='product-price']"
-      price_xpath: "//*[@data-testid='product-price']"
+      price_css: ".box_servicepack div.active span b"
+      price_xpath: "//div[contains(@class,'box_servicepack')]//div[contains(@class,'active')]/span/b"
     requires_js: true
-    rate_limit_seconds: 3
+    rate_limit_seconds: 2
