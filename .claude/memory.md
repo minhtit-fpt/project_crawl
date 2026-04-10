@@ -39,6 +39,25 @@
 
 **Plan Status:** ✅ Confirmed — implementation in progress
 
+### 2026-04-10 (Phase 5)
+**Status:** ✅ COMPLETED — committed to branch `phase/5-integration`
+
+**Files created:**
+- `main.py` — 7-step pipeline: load .env → parse CLI → load sites.yaml → init components → Scheduler.run(spider_runner) → print_results
+- Exit codes: `0`=all OK, `1`=crash/config error, `2`=partial errors
+- CLI: `--config`, `--encrypt`, `--log-level`
+- `spider_runner` closure injects `CrawlerProcess` vào `Scheduler.run()` → Scheduler vẫn testable độc lập
+- `tests/test_main.py` — 13 tests: arg parsing, env/config errors, encrypt wiring, exception handling
+
+### 2026-04-10 (Phase 4)
+**Status:** ✅ COMPLETED — committed to branch `phase/4-parsing-output`
+
+**Files created:**
+- `scraper/parser.py` — `extract_price()` CSS→XPath fallback; `_parse_price_text()` USD/EUR/VND formats; strip non-numeric TRƯỚC khi detect separator
+- `scraper/output.py` — `print_results()` aligned table; `format_results()` string; optional `Encryptor`; error rows em-dash + full error
+- `tests/test_parser.py` 31 tests + `tests/test_output.py` 20 tests
+- **Bug fix:** VND "1.500.000đ" cần strip currency suffix trước khi detect dot-thousands
+
 ### 2026-04-09 (Phase 3)
 **Status:** ✅ COMPLETED — committed to branch `phase/3-crawling-engine`
 
