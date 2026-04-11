@@ -65,10 +65,6 @@ COPY --from=builder /install /usr/local
 # Copy Playwright browsers from browser stage
 COPY --from=browser /root/.cache/ms-playwright /home/crawler/.cache/ms-playwright
 
-# Copy Playwright system deps (shared libraries installed by apt in browser stage)
-COPY --from=browser /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
-COPY --from=browser /usr/lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu 2>/dev/null || true
-
 # Copy application source
 COPY --chown=crawler:crawler . .
 
