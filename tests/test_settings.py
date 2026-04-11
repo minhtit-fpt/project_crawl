@@ -224,6 +224,67 @@ class TestLoadSitesErrors:
             load_sites(yaml_file(yaml))
 
 
+class TestYamlAnchors:
+    """Verify that YAML anchors (shared SKU lists) are resolved correctly."""
+
+    def test_shared_skus_anchor_resolved(self, yaml_file):
+        """Sites referencing *shared_skus anchor each receive the same SKU list."""
+        yaml = """
+            shared_skus: &shared_skus
+              - "SKU-A"
+              - "SKU-B"
+
+            sites:
+              - name: "Site1"
+                base_url: "https://site1.com/{sku}"
+                skus: *shared_skus
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                requires_js: false
+                rate_limit_seconds: 1
+              - name: "Site2"
+                base_url: "https://site2.com/{sku}"
+                skus: *shared_skus
+                selectors:
+                  price_css: ".q"
+                  price_xpath: "//q"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        sites = load_sites(yaml_file(yaml))
+        assert len(sites) == 2
+        assert sites[0].skus == ["SKU-A", "SKU-B"]
+        assert sites[1].skus == ["SKU-A", "SKU-B"]
+
+    def test_shared_skus_sites_are_independent(self, yaml_file):
+        """Each site's skus list is an independent copy — mutating one does not affect the other."""
+        yaml = """
+            shared_skus: &shared_skus
+              - "SKU-X"
+
+            sites:
+              - name: "Site1"
+                base_url: "https://site1.com/{sku}"
+                skus: *shared_skus
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                requires_js: false
+                rate_limit_seconds: 1
+              - name: "Site2"
+                base_url: "https://site2.com/{sku}"
+                skus: *shared_skus
+                selectors:
+                  price_css: ".q"
+                  price_xpath: "//q"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        sites = load_sites(yaml_file(yaml))
+        assert sites[0].skus == sites[1].skus
+
+
 class TestSearchModeSettings:
     def test_search_mode_parsed_correctly(self, yaml_file):
         """Lines 141-150: sku_mode='search' requires search_url and search_selectors."""
