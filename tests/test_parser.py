@@ -165,3 +165,37 @@ class TestStripHtmlTags:
 
     def test_empty_string(self):
         assert _strip_html_tags("") == ""
+
+
+# ── extract_price: XPath fallback exception path ───────────────────────────────
+
+class TestExtractPriceXPathException:
+    def test_xpath_exception_falls_through_to_none(self):
+        """Lines 69-70: XPath raises → log warning, return None (no CSS either)."""
+        class BrokenXPathResponse:
+            def css(self, query):
+                return FakeSelector(None)
+
+            def xpath(self, query):
+                raise RuntimeError("XPath engine error")
+
+        result = extract_price(BrokenXPathResponse(), FakeSelectors())
+        assert result is None
+
+
+# ── _parse_price_text: additional edge cases ───────────────────────────────────
+
+class TestParsePriceTextEdgeCases:
+    def test_comma_as_decimal_separator(self):
+        """Line 113: comma-only string where comma is decimal (e.g. '1,56')."""
+        assert _parse_price_text("1,56") == pytest.approx(1.56)
+
+    def test_comma_thousands_two_parts_non_three_digits(self):
+        """'1,5' → decimal (parts[1] != 3 digits) → 1.5."""
+        assert _parse_price_text("1,5") == pytest.approx(1.5)
+
+    def test_invalid_numeric_after_cleanup_raises(self):
+        """Lines 128-129: string that passes non-empty check but fails float()."""
+        # A string that after regex cleanup becomes something float() can't parse
+        with pytest.raises(ValueError, match="Cannot convert"):
+            _parse_price_text("1..2..3")

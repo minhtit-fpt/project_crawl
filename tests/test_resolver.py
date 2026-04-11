@@ -123,6 +123,36 @@ class TestSearchMode:
 
 # ── _make_absolute helper ──────────────────────────────────────────────────────
 
+class TestUnknownSkuMode:
+    def test_unknown_sku_mode_falls_back_to_direct(self):
+        """Lines 55-56: unknown sku_mode logs error and falls back to direct substitution."""
+        site = _make_site(sku_mode="unknown_mode")
+        url = resolve_sku_to_url("SKU-X", site)
+        # Falls back to base_url.replace("{sku}", sku)
+        assert url == "https://example.com/product/SKU-X"
+
+
+class TestDumpDebugHtml:
+    @patch("scraper.resolver.requests.get")
+    def test_oserror_on_debug_dump_is_swallowed(self, mock_get):
+        """Lines 114-115: OSError when writing debug HTML is caught silently."""
+        from unittest.mock import patch as patch2
+
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            text=SEARCH_HTML_EMPTY,
+            raise_for_status=MagicMock(),
+        )
+        site = _make_search_site()
+
+        # Patch open() inside resolver to raise OSError
+        with patch2("builtins.open", side_effect=OSError("disk full")):
+            # Should not raise — OSError is caught and logged
+            url = resolve_sku_to_url("NOTFOUND", site)
+
+        assert url is None
+
+
 class TestMakeAbsolute:
     def test_relative_path_becomes_absolute(self):
         result = _make_absolute("/may-lanh/product-slug", "https://www.dienmayxanh.com/may-lanh/{sku}")
