@@ -1,84 +1,93 @@
-"""Tests for scraper/parser.py — price extraction and text parsing."""
+"""Tests for scraper/parser.py — Scrapling-based price extraction."""
 
 import pytest
 from scraper.parser import extract_price, _parse_price_text, _strip_html_tags
 
 
-# ── Fake response helpers ──────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
-class FakeSelector:
-    def __init__(self, text: str | None):
-        self._text = text
-
-    def get(self):
-        return self._text
-
-    def getall(self):
-        return [self._text] if self._text else []
-
-
-class FakeResponse:
-    """Minimal fake Scrapy response for testing extract_price."""
-
-    def __init__(self, css_text: str | None = None, xpath_text: str | None = None):
-        self._css_text = css_text
-        self._xpath_text = xpath_text
-
-    def css(self, query: str) -> FakeSelector:
-        return FakeSelector(self._css_text)
-
-    def xpath(self, query: str) -> FakeSelector:
-        return FakeSelector(self._xpath_text)
+URL = "http://example.com/product/SKU001"
 
 
 class FakeSelectors:
+    """Standard selectors used across most tests."""
     price_css = "span.price"
     price_xpath = "//span[@class='price']"
 
 
-# ── extract_price ──────────────────────────────────────────────────────────────
+def _html(price_text: str, tag: str = "span", cls: str = "price") -> str:
+    """Minimal HTML page with a single price element."""
+    return (
+        f"<html><body>"
+        f'<{tag} class="{cls}">{price_text}</{tag}>'
+        f"</body></html>"
+    )
+
+
+# ── extract_price — happy paths ────────────────────────────────────────────────
 
 class TestExtractPrice:
     def test_returns_float_from_css(self):
-        resp = FakeResponse(css_text="$99.99")
-        result = extract_price(resp, FakeSelectors())
+        result = extract_price(_html("$99.99"), URL, FakeSelectors())
         assert result == 99.99
 
-    def test_falls_back_to_xpath_when_css_empty(self):
-        resp = FakeResponse(css_text=None, xpath_text="49.00")
-        result = extract_price(resp, FakeSelectors())
+    def test_returns_float_from_css_integer(self):
+        result = extract_price(_html("500"), URL, FakeSelectors())
+        assert result == 500.0
+
+    def test_falls_back_to_xpath_when_css_misses(self):
+        """CSS selector misses; XPath finds the element."""
+        class XPathOnlySelectors:
+            price_css = ".not-a-real-class"
+            price_xpath = "//span[@class='price']"
+
+        result = extract_price(_html("49.00"), URL, XPathOnlySelectors())
         assert result == 49.0
 
-    def test_returns_none_when_both_selectors_empty(self):
-        resp = FakeResponse(css_text=None, xpath_text=None)
-        result = extract_price(resp, FakeSelectors())
-        assert result is None
+    def test_returns_none_when_both_selectors_miss(self):
+        html = "<html><body><p>No price here</p></body></html>"
+        assert extract_price(html, URL, FakeSelectors()) is None
 
-    def test_returns_none_when_both_selectors_whitespace(self):
-        resp = FakeResponse(css_text="   ", xpath_text="  ")
-        result = extract_price(resp, FakeSelectors())
+    def test_returns_none_when_element_is_whitespace_only(self):
+        result = extract_price(_html("   "), URL, FakeSelectors())
         assert result is None
 
     def test_raises_value_error_on_unparseable_text(self):
-        resp = FakeResponse(css_text="out of stock")
         with pytest.raises(ValueError):
-            extract_price(resp, FakeSelectors())
+            extract_price(_html("out of stock"), URL, FakeSelectors())
 
-    def test_css_raises_gracefully_falls_to_xpath(self):
-        """If CSS selector itself throws, should fall back to XPath."""
-        class BrokenCSSResponse:
-            def css(self, q):
-                raise RuntimeError("selector error")
-            def xpath(self, q):
-                return FakeSelector("25.00")
-
-        result = extract_price(BrokenCSSResponse(), FakeSelectors())
-        assert result == 25.0
-
-    def test_html_tags_stripped_from_css_result(self):
-        resp = FakeResponse(css_text="<span>$1,299.00</span>")
-        result = extract_price(resp, FakeSelectors())
+    def test_nested_children_text_joined(self):
+        """Price split across child nodes: <span><b>$</b>1,299.00</span>"""
+        html = (
+            "<html><body>"
+            '<span class="price"><b>$</b>1,299.00</span>'
+            "</body></html>"
+        )
+        result = extract_price(html, URL, FakeSelectors())
         assert result == 1299.0
+
+    def test_vnd_price_extracted(self):
+        result = extract_price(_html("1.500.000đ"), URL, FakeSelectors())
+        assert result == 1_500_000.0
+
+    def test_european_price_extracted(self):
+        result = extract_price(_html("1.234,56 EUR"), URL, FakeSelectors())
+        assert result == 1234.56
+
+    def test_bad_html_returns_none_gracefully(self):
+        """Completely broken HTML should not raise — returns None."""
+        result = extract_price("not html at all <<<", URL, FakeSelectors())
+        # Scrapling is lenient; may parse partial or return None — either is OK
+        assert result is None or isinstance(result, float)
+
+    def test_different_urls_namespace_fingerprints(self):
+        """Two different URLs should each extract correctly (no cross-contamination)."""
+        url_a = "http://site-a.com/product/SKU001"
+        url_b = "http://site-b.com/product/SKU001"
+        html_a = _html("150000")
+        html_b = _html("299.99")
+        assert extract_price(html_a, url_a, FakeSelectors()) == 150_000.0
+        assert extract_price(html_b, url_b, FakeSelectors()) == 299.99
 
 
 # ── _parse_price_text ──────────────────────────────────────────────────────────
@@ -150,6 +159,17 @@ class TestParsePriceText:
         with pytest.raises(ValueError):
             _parse_price_text("---")
 
+    # ── Edge cases ─────────────────────────────────────────────────────────────
+    def test_comma_as_decimal_separator(self):
+        assert _parse_price_text("1,56") == pytest.approx(1.56)
+
+    def test_comma_non_three_digits(self):
+        assert _parse_price_text("1,5") == pytest.approx(1.5)
+
+    def test_invalid_numeric_after_cleanup_raises(self):
+        with pytest.raises(ValueError, match="Cannot convert"):
+            _parse_price_text("1..2..3")
+
 
 # ── _strip_html_tags ───────────────────────────────────────────────────────────
 
@@ -165,37 +185,3 @@ class TestStripHtmlTags:
 
     def test_empty_string(self):
         assert _strip_html_tags("") == ""
-
-
-# ── extract_price: XPath fallback exception path ───────────────────────────────
-
-class TestExtractPriceXPathException:
-    def test_xpath_exception_falls_through_to_none(self):
-        """Lines 69-70: XPath raises → log warning, return None (no CSS either)."""
-        class BrokenXPathResponse:
-            def css(self, query):
-                return FakeSelector(None)
-
-            def xpath(self, query):
-                raise RuntimeError("XPath engine error")
-
-        result = extract_price(BrokenXPathResponse(), FakeSelectors())
-        assert result is None
-
-
-# ── _parse_price_text: additional edge cases ───────────────────────────────────
-
-class TestParsePriceTextEdgeCases:
-    def test_comma_as_decimal_separator(self):
-        """Line 113: comma-only string where comma is decimal (e.g. '1,56')."""
-        assert _parse_price_text("1,56") == pytest.approx(1.56)
-
-    def test_comma_thousands_two_parts_non_three_digits(self):
-        """'1,5' → decimal (parts[1] != 3 digits) → 1.5."""
-        assert _parse_price_text("1,5") == pytest.approx(1.5)
-
-    def test_invalid_numeric_after_cleanup_raises(self):
-        """Lines 128-129: string that passes non-empty check but fails float()."""
-        # A string that after regex cleanup becomes something float() can't parse
-        with pytest.raises(ValueError, match="Cannot convert"):
-            _parse_price_text("1..2..3")

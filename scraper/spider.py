@@ -119,7 +119,7 @@ class PriceSpider(scrapy.Spider):
         from scraper.parser import extract_price  # local import to avoid circular
 
         try:
-            price = extract_price(response, job.selectors)
+            price = extract_price(response.text, response.url, job.selectors)
         except Exception as exc:
             outcome = make_error_result(
                 sku=job.sku,
