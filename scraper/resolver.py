@@ -83,11 +83,9 @@ def _resolve_via_search(sku: str, site: SiteConfig) -> Optional[str]:
 
     if not hrefs:
         logger.warning(
-            "No results found for SKU=%s on %s (selector=%r) — "
-            "dumping search HTML to debug_search_%s.html",
-            sku, site.name, site.search_selectors.result_link_css, sku,
+            "No results found for SKU=%s on %s (selector=%r)",
+            sku, site.name, site.search_selectors.result_link_css,
         )
-        _dump_debug_html(sku, resp.text)
         return None
 
     resolved = _make_absolute(hrefs[0].strip(), site.base_url)
@@ -104,12 +102,3 @@ def _make_absolute(href: str, base_url: str) -> str:
     return urljoin(origin, href)
 
 
-def _dump_debug_html(sku: str, html: str) -> None:
-    """Write HTML to a debug file for selector inspection."""
-    path = f"debug_search_{sku}.html"
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
-        logger.info("Debug HTML saved to %s", path)
-    except OSError as exc:
-        logger.debug("Could not write debug file: %s", exc)

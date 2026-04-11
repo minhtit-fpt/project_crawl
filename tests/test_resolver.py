@@ -132,11 +132,11 @@ class TestUnknownSkuMode:
         assert url == "https://example.com/product/SKU-X"
 
 
-class TestDumpDebugHtml:
+class TestNoResultsReturnsNone:
     @patch("scraper.resolver.requests.get")
-    def test_oserror_on_debug_dump_is_swallowed(self, mock_get):
-        """Lines 114-115: OSError when writing debug HTML is caught silently."""
-        from unittest.mock import patch as patch2
+    def test_no_results_returns_none_without_writing_files(self, mock_get, tmp_path, monkeypatch):
+        """No results found → returns None, no debug files created."""
+        import os
 
         mock_get.return_value = MagicMock(
             status_code=200,
@@ -145,12 +145,12 @@ class TestDumpDebugHtml:
         )
         site = _make_search_site()
 
-        # Patch open() inside resolver to raise OSError
-        with patch2("builtins.open", side_effect=OSError("disk full")):
-            # Should not raise — OSError is caught and logged
-            url = resolve_sku_to_url("NOTFOUND", site)
+        # Run from a temp dir to verify nothing is written to the project folder
+        monkeypatch.chdir(tmp_path)
+        url = resolve_sku_to_url("NOTFOUND", site)
 
         assert url is None
+        assert list(tmp_path.iterdir()) == [], "No debug files should be created"
 
 
 class TestMakeAbsolute:
