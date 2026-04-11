@@ -39,6 +39,16 @@
 
 **Plan Status:** ✅ Confirmed — implementation in progress
 
+### 2026-04-11 (Phase 6)
+**Status:** ✅ COMPLETED — committed to branch `phase/6-docker`, 179 tests pass
+
+**Files created:**
+- `Dockerfile` — 3-stage build: builder (pip deps) → browser (Chromium only via playwright install) → runtime (non-root user `crawler`, no build tools)
+- `docker-compose.yml` — `env_file:.env`, volume mount `scraper/config/:ro`, memory 1g/cpus 1.0, `restart:on-failure`, `CRAWLER_EXTRA_ARGS` env var cho CLI flags
+- `.dockerignore` — loại trừ `.env`, `tests/`, `__pycache__`, `.git`, `.claude`, `docs`
+
+**Key constraints giữ nguyên:** Chromium only, non-root user, secrets từ env_file
+
 ### 2026-04-10 (Session 2 — Debug & SKU Resolver)
 **Branch:** `phase/5-integration`
 **Status:** ✅ COMPLETED — 179 tests pass

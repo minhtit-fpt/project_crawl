@@ -1,0 +1,49 @@
+# Secrets — must never enter the image build context
+.env
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Scrapy cache
+.scrapy/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker files themselves (not needed inside image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Docs
+docs/
+*.md
+
+# Claude memory (not needed at runtime)
+.claude/
