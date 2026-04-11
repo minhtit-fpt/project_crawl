@@ -54,6 +54,32 @@ RUN playwright install chromium
 # ── Stage 3: final runtime image ──────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
+# Install Chromium runtime dependencies directly.
+# We cannot COPY shared libraries between stages — COPY does not run in a shell
+# and the library path varies by architecture.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create a non-root user to run the crawler
 RUN useradd --create-home --shell /bin/bash crawler
 
