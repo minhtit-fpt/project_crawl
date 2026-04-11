@@ -12,6 +12,17 @@
 #     price_xpath     Fallback XPath selector (used if CSS yields nothing)
 #   requires_js       true = render via Playwright; false = plain Scrapy request
 #   rate_limit_seconds  Minimum delay (seconds) between requests to this domain
+#
+# SHARED SKU LIST
+# ---------------
+# Dùng YAML anchors để nhiều site cùng dùng một danh sách SKU.
+# Khai báo anchor (&shared_skus) một lần, tham chiếu (*shared_skus) ở mỗi site.
+# yaml.safe_load() resolve anchors tự động — không cần thay đổi code Python.
+
+shared_skus: &shared_skus
+  - "NIS-C18R2T28"
+  - "NIS-C09R2T28"
+  - "MAFA-09CDN8"
 
 sites:
   - name: "DienmayXanh"
@@ -22,12 +33,22 @@ sites:
     search_url: "https://www.dienmayxanh.com/tim-kiem?key={sku}"
     search_selectors:
       result_link_css: "a.main-contain"
-    skus:
-      - "NIS-C18R2T28"
-      - "NIS-C09R2T28"
-      - "MAFA-09CDN8"
+    skus: *shared_skus
     selectors:
       price_css: ".box_servicepack div.active span b"
       price_xpath: "//div[contains(@class,'box_servicepack')]//div[contains(@class,'active')]/span/b"
+    requires_js: true
+    rate_limit_seconds: 2
+
+  - name: "NguyenKim"
+    base_url: "https://www.nguyenkim.com/tim-kiem/?query={sku}"
+    sku_mode: "search"
+    search_url: "https://www.nguyenkim.com/tim-kiem/?query={sku}"
+    search_selectors:
+      result_link_css: "a.product-item-link"
+    skus: *shared_skus
+    selectors:
+      price_css: ".product-info-price .price"
+      price_xpath: "//div[contains(@class,'product-info-price')]//span[@class='price']"
     requires_js: true
     rate_limit_seconds: 2
