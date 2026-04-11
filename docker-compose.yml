@@ -1,0 +1,31 @@
+services:
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: project_claw:latest
+
+    # Load all secrets from .env — never hardcode them here
+    env_file:
+      - .env
+
+    # Mount config dir as a volume so you can change sites.yaml without rebuilding
+    volumes:
+      - ./scraper/config:/app/scraper/config:ro
+
+    # Resource limits: prevent a runaway crawler from consuming the whole host
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
+
+    # Restart only on unexpected crashes, not on clean exit
+    restart: on-failure
+
+    # Pass CLI flags via environment variable for easy override:
+    #   LOG_LEVEL=DEBUG docker-compose up
+    command: >
+      python main.py
+      ${CRAWLER_EXTRA_ARGS:-}
