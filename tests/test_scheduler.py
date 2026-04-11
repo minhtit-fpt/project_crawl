@@ -145,6 +145,40 @@ class TestRun:
 
 # ── Factory helpers ────────────────────────────────────────────────────────────
 
+class TestBuildJobsResolveFailure:
+    """Lines 99-107, 147-148: SKU resolve failure → ErrorResult; no-jobs path."""
+
+    def test_resolve_failure_yields_error_result(self):
+        """When resolve_sku_to_url returns None, build_jobs adds an ErrorResult."""
+        from unittest.mock import patch
+
+        site = _site(skus=["BAD-SKU"])
+        scheduler = Scheduler([site])
+
+        with patch("scraper.scheduler.resolve_sku_to_url", return_value=None):
+            jobs, errors = scheduler.build_jobs()
+
+        assert jobs == []
+        assert len(errors) == 1
+        assert isinstance(errors[0], ErrorResult)
+        assert errors[0].sku == "BAD-SKU"
+        assert "ResolveError" in errors[0].error
+
+    def test_run_returns_empty_when_all_skus_fail_to_resolve(self):
+        """Lines 147-148: run() returns [] when no crawl jobs were built."""
+        from unittest.mock import patch, MagicMock
+
+        site = _site(skus=["BAD"])
+        scheduler = Scheduler([site])
+        runner_mock = MagicMock()
+
+        with patch("scraper.scheduler.resolve_sku_to_url", return_value=None):
+            results = scheduler.run(runner_mock)
+
+        runner_mock.assert_not_called()
+        assert results == []
+
+
 class TestFactories:
     def test_make_crawl_result_has_utc_timestamp(self):
         r = make_crawl_result(sku="S", price=1.0, source="X")

@@ -253,10 +253,28 @@ Quy trình mỗi phase:
 
 ---
 
+### 2026-04-11 (Phase 7 — Tests/Coverage)
+**Branch:** `phase/7-tests`
+**Status:** ✅ COMPLETED — 194 tests, 91% coverage
+
+**Dockerfile bug fixed (từ Phase 6):**
+- `COPY --from=browser /usr/lib/x86_64-linux-gnu ...` và dòng với `2>/dev/null || true` bị lỗi vì `COPY` không chạy trong shell
+- Fix: thêm `apt-get install` cho Chromium runtime deps trực tiếp trong stage 3 (runtime)
+- Lý do: multi-stage build — mỗi `FROM` bắt đầu filesystem mới, apt packages từ stage 2 không tự copy sang stage 3
+
+**Tests thêm (Phase 7):**
+- `test_parser.py`: XPath exception fallback, comma-as-decimal ("1,56"), float() ValueError
+- `test_settings.py`: invalid sku_mode, URL no-netloc, đầy đủ sku_mode='search' validation (6 cases mới)
+- `test_scheduler.py`: resolve failure → ErrorResult, no-jobs early return
+- `test_resolver.py`: unknown sku_mode fallback, OSError on debug HTML dump
+
+**Coverage breakdown:**
+- `spider.py`: 33% — intentional, requires live Scrapy/Playwright (không thể unit test)
+- Các module khác: 93-100%
+- **Total: 91%** (target: 80%)
+
 ## Next Steps
-- ~~Phase 1–5: DONE~~ ✅
-- Phase 6: Dockerfile, docker-compose.yml
-- Phase 7: Tests (80%+ coverage)
+- ~~Phase 1–7: DONE~~ ✅ **Project hoàn thành**
 - Cân nhắc: thêm persistent cache cho SKU→URL resolution (tránh gọi search API lặp lại)
 
 ---

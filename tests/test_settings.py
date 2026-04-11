@@ -189,3 +189,135 @@ class TestLoadSitesErrors:
         """
         with pytest.raises(ValueError):
             load_sites(yaml_file(yaml))
+
+    def test_invalid_sku_mode_raises(self, yaml_file):
+        """Line 133: sku_mode not in ('direct', 'search')."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "invalid"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError, match="sku_mode"):
+            load_sites(yaml_file(yaml))
+
+    def test_base_url_no_netloc_raises(self, yaml_file):
+        """Line 199: URL with scheme but no host (triple-slash path, empty netloc)."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https:///{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError):
+            load_sites(yaml_file(yaml))
+
+
+class TestSearchModeSettings:
+    def test_search_mode_parsed_correctly(self, yaml_file):
+        """Lines 141-150: sku_mode='search' requires search_url and search_selectors."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "search"
+                search_url: "https://x.com/search?q={sku}"
+                search_selectors:
+                  result_link_css: "a.result"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        site = load_sites(yaml_file(yaml))[0]
+        assert site.sku_mode == "search"
+        assert site.search_url == "https://x.com/search?q={sku}"
+        assert site.search_selectors is not None
+        assert site.search_selectors.result_link_css == "a.result"
+
+    def test_search_mode_missing_search_url_raises(self, yaml_file):
+        """Lines 142-143: search_url required when sku_mode='search'."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "search"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError, match="search_url"):
+            load_sites(yaml_file(yaml))
+
+    def test_search_mode_search_url_missing_sku_placeholder_raises(self, yaml_file):
+        """Lines 144-145: search_url must contain {sku}."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "search"
+                search_url: "https://x.com/search"
+                search_selectors:
+                  result_link_css: "a.result"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError, match="{sku}"):
+            load_sites(yaml_file(yaml))
+
+    def test_search_mode_missing_search_selectors_raises(self, yaml_file):
+        """Lines 148-149: search_selectors required when sku_mode='search'."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "search"
+                search_url: "https://x.com/search?q={sku}"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError, match="search_selectors"):
+            load_sites(yaml_file(yaml))
+
+    def test_search_selectors_not_dict_raises(self, yaml_file):
+        """Lines 174-175: _parse_search_selectors requires a mapping."""
+        yaml = """
+            sites:
+              - name: "S"
+                base_url: "https://x.com/{sku}"
+                skus: ["X"]
+                selectors:
+                  price_css: ".p"
+                  price_xpath: "//p"
+                sku_mode: "search"
+                search_url: "https://x.com/search?q={sku}"
+                search_selectors: "not-a-dict"
+                requires_js: false
+                rate_limit_seconds: 1
+        """
+        with pytest.raises(ValueError, match="result_link_css"):
+            load_sites(yaml_file(yaml))

@@ -54,6 +54,32 @@ RUN playwright install chromium
 # ── Stage 3: final runtime image ──────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
+# Install Chromium runtime dependencies directly.
+# We cannot COPY shared libraries between stages — COPY does not run in a shell
+# and the library path varies by architecture.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libxcb1 \
+    libxkbcommon0 \
+    libx11-6 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create a non-root user to run the crawler
 RUN useradd --create-home --shell /bin/bash crawler
 
@@ -64,10 +90,6 @@ COPY --from=builder /install /usr/local
 
 # Copy Playwright browsers from browser stage
 COPY --from=browser /root/.cache/ms-playwright /home/crawler/.cache/ms-playwright
-
-# Copy Playwright system deps (shared libraries installed by apt in browser stage)
-COPY --from=browser /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
-COPY --from=browser /usr/lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu 2>/dev/null || true
 
 # Copy application source
 COPY --chown=crawler:crawler . .
