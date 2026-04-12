@@ -7,8 +7,8 @@ and become ErrorResult records — they are NOT retried.
 
 Retryable conditions:
   - ConnectionError, TimeoutError, OSError
+  - playwright._impl._errors.TimeoutError (JS page navigation timeout)
   - HTTP status codes: 429, 500, 502, 503, 504
-  - playwright._impl._errors.TimeoutError (caught as TimeoutError)
 
 Non-retryable (raise immediately → ErrorResult):
   - HTTP 404 (page genuinely not found)
@@ -34,11 +34,23 @@ T = TypeVar("T")
 # HTTP status codes that warrant a retry
 RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
 
+# playwright.TimeoutError does NOT inherit from Python's builtin TimeoutError,
+# so it must be added explicitly. Guard with try/except in case playwright is
+# not installed (e.g. in test environments without browser deps).
+try:
+    from playwright._impl._errors import TimeoutError as _PlaywrightTimeoutError
+except ImportError:
+    _PlaywrightTimeoutError = None  # type: ignore[assignment]
+
 # Exception types that always trigger a retry
-RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (
-    ConnectionError,
-    TimeoutError,
-    OSError,
+RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = tuple(
+    exc for exc in (
+        ConnectionError,
+        TimeoutError,        # Python builtin
+        OSError,
+        _PlaywrightTimeoutError,  # Playwright JS timeout (different hierarchy)
+    )
+    if exc is not None
 )
 
 

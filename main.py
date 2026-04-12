@@ -7,9 +7,8 @@ Wires together all modules and runs the crawl pipeline:
   2. Parse CLI arguments
   3. Load sites.yaml
   4. Initialise ProxyManager, RateLimiter, RetryHandler
-  5. Build Scrapy CrawlerProcess with PriceSpider
-  6. Run crawl (blocking)
-  7. Print results to terminal
+  5. Run Scrapling-based spider (blocking)
+  6. Print results to terminal
 
 Usage:
     python main.py
@@ -25,15 +24,13 @@ import logging
 import sys
 from typing import Callable
 
-from scrapy.crawler import CrawlerProcess
-
-from scraper.config.settings import SCRAPY_SETTINGS, load_sites
+from scraper.config.settings import load_sites
 from scraper.output import print_results
 from scraper.proxy import ProxyManager
 from scraper.rate_limiter import RateLimiter
 from scraper.retry import RetryHandler
 from scraper.scheduler import CrawlJob, CrawlOutcome, Scheduler
-from scraper.spider import PriceSpider
+from scraper.spider import run_spider
 from security.encryption import Encryptor
 from security.env_loader import load_config
 
@@ -56,9 +53,6 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-    # Suppress harmless "Task destroyed but pending" asyncio teardown noise
-    # from scrapy-playwright shutdown on Python 3.12+ / Windows.
-    logging.getLogger("asyncio").setLevel(logging.CRITICAL)
     logger = logging.getLogger(__name__)
 
     # ── Step 3: load sites config ──────────────────────────────────────────────
@@ -88,20 +82,13 @@ def main(argv: list[str] | None = None) -> int:
         jobs: list[CrawlJob],
         result_callback: Callable[[CrawlOutcome], None],
     ) -> None:
-        scrapy_settings = {
-            **SCRAPY_SETTINGS,
-            "LOG_LEVEL": log_level,
-        }
-        process = CrawlerProcess(settings=scrapy_settings)
-        process.crawl(
-            PriceSpider,
+        run_spider(
             jobs=jobs,
             result_callback=result_callback,
             proxy_manager=proxy_manager,
             rate_limiter=rate_limiter,
             retry_handler=retry_handler,
         )
-        process.start()  # blocking until all spiders finish
 
     # ── Step 7: run and print results ──────────────────────────────────────────
     logger.info("Starting crawl...")

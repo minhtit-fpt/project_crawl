@@ -2,14 +2,12 @@
 Configuration loader for the Price Crawler.
 
 Reads scraper/config/sites.yaml, validates the schema, and exposes:
-  - SCRAPY_SETTINGS   dict ready to pass into Scrapy's CrawlerProcess
-  - load_sites()      returns a list of validated SiteConfig dataclasses
+  - load_sites()   returns a list of validated SiteConfig dataclasses
 """
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -44,39 +42,6 @@ class SiteConfig:
     sku_mode: str = "direct"
     search_url: Optional[str] = None
     search_selectors: Optional[SearchSelectors] = None
-
-
-# ── Scrapy base settings ───────────────────────────────────────────────────────
-
-SCRAPY_SETTINGS: dict = {
-    "BOT_NAME": "project_claw",
-    "USER_AGENT": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "ROBOTSTXT_OBEY": False,
-    "CONCURRENT_REQUESTS": 4,
-    "CONCURRENT_REQUESTS_PER_DOMAIN": 1,
-    "DOWNLOAD_TIMEOUT": 30,
-    "RETRY_ENABLED": False,           # Retries are handled by retry.py, not Scrapy
-    "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO"),
-    # scrapy-playwright
-    "DOWNLOAD_HANDLERS": {
-        "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    },
-    "PLAYWRIGHT_BROWSER_TYPE": "chromium",
-    "PLAYWRIGHT_LAUNCH_OPTIONS": {
-        "headless": True,
-        "args": [
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-        ],
-    },
-    "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
-}
 
 
 # ── Public loader ──────────────────────────────────────────────────────────────

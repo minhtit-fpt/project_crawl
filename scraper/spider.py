@@ -1,207 +1,171 @@
 """
-Scrapy spider with Playwright integration.
+Scrapling-based price fetcher.
 
-Receives CrawlJob objects from the Scheduler, fetches each page (using
-Playwright for JS-heavy sites, plain Scrapy for static ones), delegates
-price extraction to parser.py, and yields CrawlResult or ErrorResult.
+Replaces Scrapy + scrapy-playwright with Scrapling's native async fetchers.
+Benefits:
+  - No Scrapy event-loop / Twisted reactor complexity
+  - Full asyncio — no "Event loop closed" noise at shutdown
+  - Mockable for unit tests without a live browser process
 
-Anti-detection measures applied:
-  - Random user-agent rotation
-  - Playwright stealth args (disable AutomationControlled flag)
-  - Rate limiting via RateLimiter before each request
-  - Proxy assignment via ProxyManager
-  - Retry logic via RetryHandler for transient failures
+Strategy per job:
+  - requires_js=True  → DynamicFetcher.async_fetch() (Chromium, wait for load)
+  - requires_js=False → AsyncFetcher.get()            (httpx, stealth headers)
+
+Concurrency is bounded by CONCURRENCY_LIMIT to avoid overwhelming targets.
+Rate limiting, proxy rotation, and retry logic are reused from existing modules.
+
+JS fetch tuning:
+  - network_idle=False: don't wait for full network idle (heavy sites never idle)
+  - timeout=60000: 60s budget — generous for slow e-commerce sites
+  - retries=1: minimum allowed; RetryHandler owns outer retry logic
+  - disable_resources omitted: some sites use resource loading as anti-bot signal
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Callable
 
-import scrapy
-from scrapy import signals
-from scrapy.http import Response
-from scrapy_playwright.page import PageMethod
+from scrapling.fetchers import AsyncFetcher, DynamicFetcher
 
-from scraper.config.settings import SelectorConfig
+from scraper.parser import extract_price
 from scraper.proxy import ProxyManager
 from scraper.rate_limiter import RateLimiter
 from scraper.retry import NonRetryableError, RetryableHTTPError, RetryHandler
 from scraper.scheduler import (
     CrawlJob,
     CrawlOutcome,
-    CrawlResult,
-    ErrorResult,
     make_crawl_result,
     make_error_result,
 )
 
 logger = logging.getLogger(__name__)
 
-# HTTP status codes that are non-retryable (legitimate "not found")
+# HTTP statuses that are definitive failures — no retry
 NON_RETRYABLE_STATUS: frozenset[int] = frozenset({404, 410})
 
-# Rotated user-agent pool
-USER_AGENTS: list[str] = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-]
+# HTTP statuses that warrant a retry with backoff
+RETRYABLE_STATUS: frozenset[int] = frozenset({429, 500, 502, 503, 504})
+
+# Max simultaneous in-flight requests across all domains.
+# Keep low for JS pages — multiple Chromium tabs to the same domain
+# raises anti-bot flags and exhausts memory faster.
+CONCURRENCY_LIMIT: int = 3
 
 
-class PriceSpider(scrapy.Spider):
-    """Scrapy spider that crawls price data for a list of CrawlJobs.
+# ── Internal fetch helpers ─────────────────────────────────────────────────────
 
-    Instantiate with:
-        spider = PriceSpider(
-            jobs=[...],
-            result_callback=scheduler.collect_result,
-            proxy_manager=proxy_manager,
-            rate_limiter=rate_limiter,
-        )
+async def _do_fetch(job: CrawlJob, proxy: str | None) -> tuple[int, str]:
+    """Perform a single HTTP fetch and return (status_code, html_string).
+
+    Uses PlayWrightFetcher for JS-required pages, AsyncFetcher otherwise.
+    Both accept proxy as a plain URL string (or None).
     """
+    if job.requires_js:
+        page = await DynamicFetcher.async_fetch(
+            job.url,
+            proxy=proxy,
+            network_idle=False,   # don't wait for idle — heavy sites never idle
+            timeout=60_000,       # 60s per page (default 30s is too short)
+            retries=1,            # Minimum allowed; RetryHandler manages outer retries
+            headless=True,
+            # NOTE: disable_resources intentionally omitted — some sites (e.g.
+            # dienmayxanh.com) use resource loading as an anti-bot signal and
+            # will block headless browsers that drop fonts/images/stylesheets.
+        )
+    else:
+        page = await AsyncFetcher.get(
+            job.url,
+            proxy=proxy,
+            stealthy_headers=True,
+        )
 
-    name = "price_spider"
+    html = page.body.decode(page.encoding or "utf-8", errors="replace")
+    return page.status, html
 
-    # Disable Scrapy's built-in retry — we handle it in RetryHandler
-    custom_settings: dict[str, Any] = {
-        "RETRY_ENABLED": False,
-    }
 
-    def __init__(
-        self,
-        jobs: list[CrawlJob],
-        result_callback: Callable[[CrawlOutcome], None],
-        proxy_manager: ProxyManager,
-        rate_limiter: RateLimiter,
-        retry_handler: RetryHandler | None = None,
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self._jobs = jobs
-        self._result_callback = result_callback
-        self._proxy_manager = proxy_manager
-        self._rate_limiter = rate_limiter
-        self._retry_handler = retry_handler or RetryHandler()
-        self._ua_index = 0
+async def _fetch_job(
+    job: CrawlJob,
+    proxy_manager: ProxyManager,
+    rate_limiter: RateLimiter,
+    retry_handler: RetryHandler,
+) -> CrawlOutcome:
+    """Fetch, parse, and return a CrawlOutcome for one job.
 
-    # ── Scrapy lifecycle ───────────────────────────────────────────────────────
+    Applies rate limiting before the first attempt, then delegates retries
+    to RetryHandler. Proxy is selected once and reused across retry attempts.
+    """
+    await rate_limiter.wait(job.url, job.rate_limit_seconds)
+    proxy = proxy_manager.get_proxy()
 
-    async def start(self):  # type: ignore[override]
-        """Scrapy 2.13+ async entry point (replaces deprecated start_requests)."""
-        for job in self._jobs:
-            yield self._build_request(job)
+    async def _attempt() -> CrawlOutcome:
+        status, html = await _do_fetch(job, proxy)
 
-    def parse(self, response: Response, **kwargs: Any) -> Generator[CrawlOutcome, None, None]:
-        job: CrawlJob = response.meta["job"]
+        if status in NON_RETRYABLE_STATUS:
+            raise NonRetryableError(f"HTTP {status}")
 
-        # Non-retryable HTTP status → ErrorResult immediately
-        if response.status in NON_RETRYABLE_STATUS:
-            outcome = make_error_result(
-                sku=job.sku,
-                source=job.site_name,
-                error=f"HTTP {response.status}",
-            )
-            self._result_callback(outcome)
-            yield outcome
-            return
-
-        # Retryable HTTP status → raise so Scrapy's errback handles it
-        if response.status >= 400:
-            raise RetryableHTTPError(response.status, response.url)
-
-        # Extract price
-        from scraper.parser import extract_price  # local import to avoid circular
+        if status in RETRYABLE_STATUS:
+            raise RetryableHTTPError(status, job.url)
 
         try:
-            price = extract_price(response.text, response.url, job.selectors)
-        except Exception as exc:
-            outcome = make_error_result(
-                sku=job.sku,
-                source=job.site_name,
-                error=f"ParseError: {exc}",
-            )
-            self._result_callback(outcome)
-            yield outcome
-            return
+            price = extract_price(html, job.url, job.selectors)
+        except ValueError as exc:
+            raise NonRetryableError(f"ParseError: {exc}") from exc
 
         if price is None:
-            outcome = make_error_result(
-                sku=job.sku,
-                source=job.site_name,
-                error="Price element not found",
-            )
-        else:
-            outcome = make_crawl_result(
-                sku=job.sku,
-                price=price,
-                source=job.site_name,
-            )
+            raise NonRetryableError("Price element not found")
 
-        self._result_callback(outcome)
-        yield outcome
+        return make_crawl_result(sku=job.sku, price=price, source=job.site_name)
 
-    def errback(self, failure: Any) -> None:
-        """Handle request-level failures (connection errors, timeouts, etc.)."""
-        request = failure.request
-        job: CrawlJob = request.meta["job"]
-        proxy = request.meta.get("proxy")
-
-        # Mark proxy as dead on network-level failures
+    try:
+        return await retry_handler.run(_attempt)
+    except NonRetryableError as exc:
+        return make_error_result(sku=job.sku, source=job.site_name, error=str(exc))
+    except Exception as exc:
+        # Network-level or unknown failure — mark proxy dead if one was used
         if proxy:
-            self._proxy_manager.mark_dead(proxy)
-
-        error_msg = str(failure.value)
+            proxy_manager.mark_dead(proxy)
         logger.warning(
-            "Request failed for SKU=%s site=%s: %s",
-            job.sku, job.site_name, error_msg,
+            "Job failed SKU=%s site=%s: %s", job.sku, job.site_name, exc
         )
+        return make_error_result(sku=job.sku, source=job.site_name, error=str(exc))
 
-        outcome = make_error_result(
-            sku=job.sku,
-            source=job.site_name,
-            error=error_msg,
-        )
-        self._result_callback(outcome)
 
-    # ── Private helpers ────────────────────────────────────────────────────────
+# ── Async runner ───────────────────────────────────────────────────────────────
 
-    def _build_request(self, job: CrawlJob) -> scrapy.Request:
-        """Build a Scrapy Request for the given job, applying proxy and UA."""
-        proxy = self._proxy_manager.get_proxy()
-        user_agent = self._rotate_user_agent()
+async def _run_async(
+    jobs: list[CrawlJob],
+    result_callback: Callable[[CrawlOutcome], None],
+    proxy_manager: ProxyManager,
+    rate_limiter: RateLimiter,
+    retry_handler: RetryHandler,
+) -> None:
+    """Run all jobs concurrently (bounded by CONCURRENCY_LIMIT)."""
+    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
 
-        meta: dict[str, Any] = {
-            "job": job,
-            "proxy": proxy,
-        }
+    async def _bounded(job: CrawlJob) -> None:
+        async with semaphore:
+            outcome = await _fetch_job(job, proxy_manager, rate_limiter, retry_handler)
+            result_callback(outcome)
 
-        if job.requires_js:
-            meta["playwright"] = True
-            meta["playwright_include_page"] = False
-            # Wait for the price element to appear after JS renders the page.
-            # Falls back gracefully if the selector never appears (timeout).
-            meta["playwright_page_methods"] = [
-                PageMethod("wait_for_load_state", "networkidle"),
-            ]
+    await asyncio.gather(*[_bounded(job) for job in jobs])
 
-        request = scrapy.Request(
-            url=job.url,
-            callback=self.parse,
-            errback=self.errback,
-            headers={"User-Agent": user_agent},
-            meta=meta,
-            dont_filter=True,
-        )
 
-        return request
+# ── Public entry point ─────────────────────────────────────────────────────────
 
-    def _rotate_user_agent(self) -> str:
-        ua = USER_AGENTS[self._ua_index % len(USER_AGENTS)]
-        self._ua_index += 1
-        return ua
+def run_spider(
+    jobs: list[CrawlJob],
+    result_callback: Callable[[CrawlOutcome], None],
+    proxy_manager: ProxyManager,
+    rate_limiter: RateLimiter,
+    retry_handler: RetryHandler,
+) -> None:
+    """Blocking entry point — fetches all jobs and calls result_callback for each.
+
+    Designed to be called from a synchronous context (main.py).
+    Internally runs an asyncio event loop via asyncio.run().
+    """
+    asyncio.run(
+        _run_async(jobs, result_callback, proxy_manager, rate_limiter, retry_handler)
+    )
