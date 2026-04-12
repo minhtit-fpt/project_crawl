@@ -279,6 +279,70 @@ Quy trình mỗi phase:
 
 ---
 
+### 2026-04-11 (Phase 8 — Scrapling Spider)
+**Branch:** `feat/scrapling-spider`
+**Status:** 🔄 IN PROGRESS — plan confirmed, not yet implemented
+
+**Mục tiêu:** Thay `Scrapy + scrapy-playwright` bằng `Scrapling fetchers` (vốn đã có trong requirements)
+
+**Vấn đề với Scrapy hiện tại:**
+- `spider.py` coverage chỉ 33% — không thể unit test thiếu live Scrapy process
+- `RuntimeError: Event loop is closed` noise cuối run
+- scrapy-playwright Python 3.14 compat vấn đề
+- 3 lớp phức tạp chỉ để fetch (CrawlerProcess + PriceSpider + scrapy-playwright)
+
+**Kế hoạch implement (4 phases):**
+
+1. **Phase 1 — Rewrite `scraper/spider.py`**
+   - Tạo async `ScraplingRunner` dùng `asyncio.gather`
+   - `PlayWrightFetcher` cho `requires_js=true`, `Fetcher` cho static
+   - Giữ nguyên `RetryHandler`, `RateLimiter`, `ProxyManager`
+   - Proxy format: kiểm tra scrapling docs trước khi implement
+
+2. **Phase 2 — Update `main.py`**
+   - Bỏ `from scrapy.crawler import CrawlerProcess`
+   - Bỏ `SCRAPY_SETTINGS`
+   - `spider_runner` đơn giản: `asyncio.run(run_scrapling(...))`
+
+3. **Phase 3 — Update `settings.py` & `requirements.txt`**
+   - Bỏ `SCRAPY_SETTINGS` dict khỏi `settings.py`
+   - Remove `scrapy>=2.11.2` và `scrapy-playwright>=0.0.46` khỏi requirements
+
+4. **Phase 4 — Viết `tests/test_spider.py`** *(NEW)*
+   - Mock `Fetcher.get()` / `PlayWrightFetcher.get()`
+   - Test: fetch OK → CrawlResult, HTTP 404 → ErrorResult, network error → retry → ErrorResult
+   - Test: requires_js → PlayWrightFetcher, proxy dead → mark_dead, rate limiter → acquire
+   - Target coverage: ~80%+ (hiện tại 33%)
+
+**Files bị ảnh hưởng:**
+- `scraper/spider.py` — REWRITE
+- `main.py` — SIMPLIFY
+- `scraper/config/settings.py` — bỏ SCRAPY_SETTINGS
+- `requirements.txt` — remove scrapy + scrapy-playwright
+- `tests/test_spider.py` — NEW
+
+**Status:** ✅ COMPLETED — 221 tests, 98% coverage, spider.py 100% (từ 33%)
+
+**Kết quả:**
+- `scrapy` + `scrapy-playwright` đã được xóa khỏi requirements
+- `spider.py` rewrite dùng `DynamicFetcher.async_fetch()` (JS) + `AsyncFetcher.get()` (static)
+- `main.py` đơn giản hóa — bỏ `CrawlerProcess`, dùng `run_spider()` trực tiếp
+- `settings.py` xóa `SCRAPY_SETTINGS` dict
+- `tests/test_spider.py` tạo mới — 22 tests, coverage 100%
+
+**Deps mới cần cài (scrapling fetcher dependencies):**
+- `curl_cffi>=0.7` (HTTP engine)
+- `browserforge>=1.0` (header fingerprinting)
+- `msgspec>=0.18` (config validation)
+
+**Lưu ý API scrapling 0.4+:**
+- `PlayWrightFetcher` đã đổi tên thành `DynamicFetcher`
+- JS fetch: `await DynamicFetcher.async_fetch(url, network_idle=True, ...)`
+- Static fetch: `await AsyncFetcher.get(url, stealthy_headers=True, ...)`
+- Response: `.status` (int), `.body` (bytes), `.encoding` (str|None)
+
+---
+
 ## Notes
 - Project dir: `D:\Project\project_claw`
 - All secrets must use `.env` (never hardcode)

@@ -105,11 +105,7 @@ class TestMainSuccess:
                 callback(make_crawl_result(sku=job.sku, price=99.9, source=job.site_name))
 
         with patch.dict(os.environ, VALID_ENV, clear=True):
-            with patch("main.CrawlerProcess") as mock_process_cls:
-                # Make CrawlerProcess behave like our fake runner
-                mock_process = MagicMock()
-                mock_process_cls.return_value = mock_process
-
+            with patch("main.run_spider"):
                 # Patch spider_runner inside main via Scheduler.run
                 with patch("main.Scheduler.run", side_effect=lambda runner: fake_spider_runner(
                     # build_jobs is called inside run, so delegate properly
