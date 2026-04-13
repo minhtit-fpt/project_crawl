@@ -138,10 +138,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        default="yaml",
+        default="api",
         choices=["yaml", "api"],
-        help="Crawl target source: 'yaml' (default) reads sites.yaml, "
-             "'api' fetches from CMS API using CMS_API_URL and CMS_API_TOKEN",
+        help="Crawl target source: 'api' (default) fetches from CMS API using "
+             "CMS_API_URL and CMS_API_TOKEN, 'yaml' reads sites.yaml",
     )
     return parser.parse_args(argv)
 

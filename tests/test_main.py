@@ -48,7 +48,7 @@ class TestParseArgs:
         assert args.config is None
         assert args.encrypt is False
         assert args.log_level is None
-        assert args.source == "yaml"
+        assert args.source == "api"
 
     def test_source_api_flag(self):
         args = _parse_args(["--source", "api"])
@@ -100,7 +100,7 @@ class TestMainEnvErrors:
 class TestMainConfigErrors:
     def test_missing_config_file_returns_1(self):
         with patch.dict(os.environ, VALID_ENV, clear=True):
-            code = main(["--config", "/nonexistent/sites.yaml"])
+            code = main(["--source", "yaml", "--config", "/nonexistent/sites.yaml"])
         assert code == 1
 
 
@@ -125,7 +125,7 @@ class TestMainSuccess:
                     [MagicMock(sku="SKU-001", site_name="TestShop")],
                     lambda r: None,
                 ) or [make_crawl_result("SKU-001", 99.9, "TestShop")]):
-                    code = main(["--config", config_path])
+                    code = main(["--source", "yaml", "--config", config_path])
 
         # Code should be 0 or 2 (not 1 which means crash)
         assert code in (0, 2)
@@ -141,7 +141,7 @@ class TestMainSuccess:
                 mock_run.return_value = [
                     make_error_result("SKU-001", "TestShop", "HTTP 404")
                 ]
-                code = main(["--config", config_path])
+                code = main(["--source", "yaml", "--config", config_path])
 
         assert code == 2
 
@@ -155,7 +155,7 @@ class TestMainSuccess:
             with patch("main.Scheduler.run") as mock_run:
                 mock_run.return_value = [make_crawl_result("SKU-001", 10.0, "S")]
                 with patch("main.print_results") as mock_print:
-                    main(["--config", config_path])
+                    main(["--source", "yaml", "--config", config_path])
                     _, kwargs = mock_print.call_args
                     assert kwargs.get("encryptor") is None
 
@@ -169,7 +169,7 @@ class TestMainSuccess:
             with patch("main.Scheduler.run") as mock_run:
                 mock_run.return_value = [make_crawl_result("SKU-001", 10.0, "S")]
                 with patch("main.print_results") as mock_print:
-                    main(["--config", config_path, "--encrypt"])
+                    main(["--source", "yaml", "--config", config_path, "--encrypt"])
                     _, kwargs = mock_print.call_args
                     assert kwargs.get("encryptor") is not None
 
@@ -182,7 +182,7 @@ class TestMainCrawlError:
 
         with patch.dict(os.environ, VALID_ENV, clear=True):
             with patch("main.Scheduler.run", side_effect=RuntimeError("boom")):
-                code = main(["--config", config_path])
+                code = main(["--source", "yaml", "--config", config_path])
 
         assert code == 1
 
@@ -249,14 +249,14 @@ class TestMainSourceApi:
                         mock_load_sites.assert_not_called()
 
     def test_yaml_mode_does_not_call_api(self, tmp_path):
-        """--source yaml (default) must not call fetch_products()."""
+        """--source yaml must not call fetch_products()."""
         config_path = _make_sites_yaml(tmp_path)
         from scraper.scheduler import make_crawl_result
 
         with patch.dict(os.environ, VALID_ENV, clear=True):
             with patch("main.fetch_products") as mock_fetch:
                 with patch("main.Scheduler.run", return_value=[make_crawl_result("SKU-001", 1.0, "s")]):
-                    main(["--config", config_path])
+                    main(["--source", "yaml", "--config", config_path])
                     mock_fetch.assert_not_called()
 
 
