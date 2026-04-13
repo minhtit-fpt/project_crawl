@@ -29,7 +29,7 @@ from typing import Callable
 
 from scrapling.fetchers import AsyncFetcher, DynamicFetcher
 
-from scraper.parser import extract_price
+from scraper.parser import extract_price, extract_price_auto
 from scraper.proxy import ProxyManager
 from scraper.rate_limiter import RateLimiter
 from scraper.retry import NonRetryableError, RetryableHTTPError, RetryHandler
@@ -109,7 +109,10 @@ async def _fetch_job(
             raise RetryableHTTPError(status, job.url)
 
         try:
-            price = extract_price(html, job.url, job.selectors)
+            if job.selectors is not None:
+                price = extract_price(html, job.url, job.selectors)
+            else:
+                price = extract_price_auto(html, job.url)
         except ValueError as exc:
             raise NonRetryableError(f"ParseError: {exc}") from exc
 

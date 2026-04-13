@@ -25,6 +25,7 @@ text cannot be parsed (both become ErrorResult — not retried).
 """
 from __future__ import annotations
 
+import json
 import re
 import logging
 from typing import Optional, Protocol
@@ -35,6 +36,25 @@ logger = logging.getLogger(__name__)
 
 _NON_NUMERIC = re.compile(r"[^\d.,\-]")
 _HTML_TAG = re.compile(r"<[^>]+>")
+_JSON_LD_TAG = re.compile(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.DOTALL | re.IGNORECASE)
+
+# Common Vietnamese e-commerce price selectors tried in order.
+# Ordered from most-specific (structured data attributes) to most-generic.
+_AUTO_CSS_SELECTORS = (
+    "[itemprop='price']",
+    "[itemprop='offers'] [itemprop='price']",
+    ".box-price__selling",         # dienmayxanh.com, mediamart.vn
+    ".product-price",
+    ".price-current",
+    ".sale-price",
+    ".special-price .price",
+    ".special-price",
+    ".current-price",
+    ".box-price",
+    "span.price",
+    "p.price",
+    ".price",
+)
 
 
 class SelectorConfig(Protocol):
@@ -61,6 +81,98 @@ def extract_price(html: str, url: str, selectors: SelectorConfig) -> Optional[fl
         )
         return None
     return _parse_price_text(raw_text)
+
+
+def extract_price_auto(html: str, url: str) -> Optional[float]:
+    """Auto-detect and extract a price from an unknown e-commerce page.
+
+    Used when no selector config is available (e.g. jobs sourced from CMS API).
+
+    Strategy (in order of reliability):
+      1. JSON-LD structured data (schema.org Product / Offer)
+      2. Schema.org microdata attribute (itemprop="price")
+      3. Common Vietnamese e-commerce CSS patterns
+      4. Returns None if all strategies fail — caller converts to ErrorResult
+
+    Does NOT raise ValueError — any parse error returns None so callers
+    can treat it as a soft failure without crashing the crawl.
+    """
+    # ── 1. JSON-LD ─────────────────────────────────────────────────────────────
+    price = _extract_from_json_ld(html)
+    if price is not None:
+        logger.debug("auto-detect JSON-LD price=%s url=%s", price, url)
+        return price
+
+    # ── 2 & 3. DOM-based (microdata attr + CSS heuristics) ────────────────────
+    try:
+        page = Adaptor(html, url=url, auto_match=True)
+    except Exception as exc:
+        logger.warning("auto-detect: Adaptor failed for %s: %s", url, exc)
+        return None
+
+    for selector in _AUTO_CSS_SELECTORS:
+        try:
+            els = page.css(selector, auto_save=True)
+            if not els:
+                continue
+            text = els[0].get_all_text(separator="").strip()
+            if not text:
+                continue
+            try:
+                parsed = _parse_price_text(text)
+                logger.debug("auto-detect CSS %r price=%s url=%s", selector, parsed, url)
+                return parsed
+            except ValueError:
+                continue
+        except Exception as exc:
+            logger.debug("auto-detect CSS %r error: %s", selector, exc)
+
+    logger.debug("auto-detect: no price found for %s", url)
+    return None
+
+
+def _extract_from_json_ld(html: str) -> Optional[float]:
+    """Extract price from JSON-LD <script> blocks (schema.org Product/Offer).
+
+    Handles both top-level Product and nested offers structures.
+    Returns None on any error or if no price field is found.
+    """
+    for match in _JSON_LD_TAG.finditer(html):
+        try:
+            data = json.loads(match.group(1))
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        # Normalise: wrap single object into list for uniform processing
+        items = data if isinstance(data, list) else [data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            # schema.org Product with direct "price" key
+            price_raw = item.get("price")
+            if price_raw is not None:
+                try:
+                    return _parse_price_text(str(price_raw))
+                except ValueError:
+                    pass
+
+            # schema.org Product → offers → price
+            offers = item.get("offers")
+            if isinstance(offers, dict):
+                offers = [offers]
+            if isinstance(offers, list):
+                for offer in offers:
+                    if not isinstance(offer, dict):
+                        continue
+                    price_raw = offer.get("price")
+                    if price_raw is not None:
+                        try:
+                            return _parse_price_text(str(price_raw))
+                        except ValueError:
+                            pass
+
+    return None
 
 
 def _find_text(html: str, url: str, selectors: SelectorConfig) -> Optional[str]:

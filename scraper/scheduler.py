@@ -32,9 +32,9 @@ class CrawlJob:
     site_name: str
     url: str                     # base_url with {sku} already substituted
     sku: str
-    selectors: SelectorConfig
     requires_js: bool
     rate_limit_seconds: float
+    selectors: Optional[SelectorConfig] = None  # None → auto-detect price
 
 
 @dataclass
@@ -110,9 +110,9 @@ class Scheduler:
                         site_name=site.name,
                         url=url,
                         sku=sku,
-                        selectors=site.selectors,
                         requires_js=site.requires_js,
                         rate_limit_seconds=site.rate_limit_seconds,
+                        selectors=site.selectors,
                     )
                 )
 
