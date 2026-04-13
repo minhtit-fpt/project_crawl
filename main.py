@@ -5,7 +5,7 @@ Wires together all modules and runs the crawl pipeline:
 
   1. Load + validate .env (fail fast on missing secrets)
   2. Parse CLI arguments
-  3. Load sites.yaml
+  3. Load crawl targets (from sites.yaml or CMS API)
   4. Initialise ProxyManager, RateLimiter, RetryHandler
   5. Run Scrapling-based spider (blocking)
   6. Print results to terminal
@@ -13,6 +13,7 @@ Wires together all modules and runs the crawl pipeline:
 Usage:
     python main.py
     python main.py --config path/to/sites.yaml
+    python main.py --source api
     python main.py --encrypt
     python main.py --log-level DEBUG
 """
@@ -24,6 +25,7 @@ import logging
 import sys
 from typing import Callable
 
+from scraper.config.api_source import ApiSourceError, build_jobs_from_api, fetch_products
 from scraper.config.settings import load_sites
 from scraper.output import print_results
 from scraper.proxy import ProxyManager
@@ -55,18 +57,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger = logging.getLogger(__name__)
 
-    # ── Step 3: load sites config ──────────────────────────────────────────────
-    try:
-        site_configs = load_sites(args.config)
-    except (FileNotFoundError, ValueError) as exc:
-        logger.error("Failed to load sites config: %s", exc)
-        return 1
+    # ── Step 3: load crawl targets ─────────────────────────────────────────────
+    if args.source == "api":
+        scheduler = _build_scheduler_from_api(config, logger)
+        if scheduler is None:
+            return 1
+    else:
+        try:
+            site_configs = load_sites(args.config)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.error("Failed to load sites config: %s", exc)
+            return 1
 
-    logger.info(
-        "Loaded %d site(s) with %d total SKUs",
-        len(site_configs),
-        sum(len(s.skus) for s in site_configs),
-    )
+        logger.info(
+            "Loaded %d site(s) with %d total SKUs",
+            len(site_configs),
+            sum(len(s.skus) for s in site_configs),
+        )
+        scheduler = Scheduler(site_configs)
 
     # ── Step 4: initialise components ─────────────────────────────────────────
     proxy_manager = ProxyManager(config.proxy_list)
@@ -74,10 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     retry_handler = RetryHandler(max_retries=3, base_delay=1.0, max_delay=30.0)
     encryptor = Encryptor(config.aes_secret_key, config.aes_iv) if args.encrypt else None
 
-    # ── Step 5: build scheduler ────────────────────────────────────────────────
-    scheduler = Scheduler(site_configs)
-
-    # ── Step 6: spider runner (injected into scheduler.run) ───────────────────
+    # ── Step 5: spider runner (injected into scheduler.run) ──────────────────
     def spider_runner(
         jobs: list[CrawlJob],
         result_callback: Callable[[CrawlOutcome], None],
@@ -90,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
             retry_handler=retry_handler,
         )
 
-    # ── Step 7: run and print results ──────────────────────────────────────────
+    # ── Step 6: run and print results ─────────────────────────────────────────
     logger.info("Starting crawl...")
     try:
         results = scheduler.run(spider_runner)
@@ -131,7 +136,42 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         metavar="LEVEL",
         help="Override log level from .env (DEBUG|INFO|WARNING|ERROR)",
     )
+    parser.add_argument(
+        "--source",
+        default="yaml",
+        choices=["yaml", "api"],
+        help="Crawl target source: 'yaml' (default) reads sites.yaml, "
+             "'api' fetches from CMS API using CMS_API_URL and CMS_API_TOKEN",
+    )
     return parser.parse_args(argv)
+
+
+def _build_scheduler_from_api(config: object, logger: logging.Logger) -> Scheduler | None:
+    """Fetch products from CMS API and return a Scheduler with pre-built jobs.
+
+    Returns None (and logs the error) if credentials are missing or the API
+    request fails — caller should return exit code 1.
+    """
+    api_url = config.cms_api_url
+    api_token = config.cms_api_token
+
+    if not api_url or not api_token:
+        logger.error(
+            "CMS API credentials not set. Add CMS_API_URL and CMS_API_TOKEN "
+            "to your .env file before using --source api."
+        )
+        return None
+
+    logger.info("Fetching crawl targets from CMS API: %s", api_url)
+    try:
+        products = fetch_products(api_url, api_token)
+    except ApiSourceError as exc:
+        logger.error("Failed to fetch from CMS API: %s", exc)
+        return None
+
+    jobs = build_jobs_from_api(products)
+    logger.info("CMS API: %d products → %d crawl jobs", len(products), len(jobs))
+    return Scheduler.from_jobs(jobs)
 
 
 if __name__ == "__main__":
