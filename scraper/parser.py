@@ -40,10 +40,16 @@ _JSON_LD_TAG = re.compile(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*
 
 # Common Vietnamese e-commerce price selectors tried in order.
 # Ordered from most-specific (structured data attributes) to most-generic.
+# IMPORTANT: more-specific selectors must come BEFORE generic ones to avoid
+# capturing mixed text (e.g. WooCommerce .price contains both old and new price).
 _AUTO_CSS_SELECTORS = (
     "[itemprop='price']",
     "[itemprop='offers'] [itemprop='price']",
-    ".box-price__selling",         # dienmayxanh.com, mediamart.vn
+    ".box-price__selling",              # dienmayxanh.com, mediamart.vn
+    "[class*='price__main__1']",        # dienmayan.vn (BEM pattern)
+    ".price ins span",                  # WooCommerce sale price (dienmaytamanh.vn)
+    ".price ins",                       # WooCommerce sale price container
+    ".item-price",                      # muahangtaikho.vn
     ".product-price",
     ".price-current",
     ".sale-price",
@@ -134,7 +140,9 @@ def extract_price_auto(html: str, url: str) -> Optional[float]:
 def _extract_from_json_ld(html: str) -> Optional[float]:
     """Extract price from JSON-LD <script> blocks (schema.org Product/Offer).
 
-    Handles both top-level Product and nested offers structures.
+    Handles: direct price key, offers.price, and priceSpecification arrays.
+    For priceSpecification, prefers entries without a priceType (i.e. the
+    actual selling price) over ListPrice entries.
     Returns None on any error or if no price field is found.
     """
     for match in _JSON_LD_TAG.finditer(html):
@@ -172,7 +180,47 @@ def _extract_from_json_ld(html: str) -> Optional[float]:
                         except ValueError:
                             pass
 
+            # schema.org priceSpecification (used by dieuhoa.vip, dienmaytamanh.vn)
+            price = _extract_from_price_specification(item.get("priceSpecification"))
+            if price is not None:
+                return price
+
     return None
+
+
+_LIST_PRICE_TYPE = "https://schema.org/ListPrice"
+
+
+def _extract_from_price_specification(spec: object) -> Optional[float]:
+    """Extract the selling price from a priceSpecification value.
+
+    Prefers entries without priceType (actual sale price) over ListPrice.
+    Falls back to the first parseable entry if all have a priceType.
+    """
+    if isinstance(spec, dict):
+        spec = [spec]
+    if not isinstance(spec, list):
+        return None
+
+    fallback: Optional[float] = None
+    for entry in spec:
+        if not isinstance(entry, dict):
+            continue
+        price_raw = entry.get("price")
+        if price_raw is None:
+            continue
+        try:
+            parsed = _parse_price_text(str(price_raw))
+        except ValueError:
+            continue
+
+        price_type = entry.get("priceType", "")
+        if _LIST_PRICE_TYPE not in str(price_type):
+            return parsed          # non-list price → return immediately
+        if fallback is None:
+            fallback = parsed      # store list price as last-resort fallback
+
+    return fallback
 
 
 def _find_text(html: str, url: str, selectors: SelectorConfig) -> Optional[str]:

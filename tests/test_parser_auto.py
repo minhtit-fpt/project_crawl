@@ -1,7 +1,7 @@
 """Tests for parser.py auto-detect functions — extract_price_auto and _extract_from_json_ld."""
 
 import pytest
-from scraper.parser import extract_price_auto, _extract_from_json_ld
+from scraper.parser import extract_price_auto, _extract_from_json_ld, _extract_from_price_specification
 
 URL = "https://example.com/product/SKU001"
 
@@ -54,6 +54,51 @@ class TestExtractFromJsonLd:
             '<script type="application/ld+json">{"@type":"Product","price":2200000}</script>'
         )
         assert _extract_from_json_ld(html) == 2200000.0
+
+    # ── priceSpecification support (dieuhoa.vip / dienmaytamanh.vn pattern) ─────
+
+    def test_price_specification_array(self):
+        """dieuhoa.vip: priceSpecification list with selling price first."""
+        html = _json_ld(
+            '{"@type":"Product","priceSpecification":['
+            '{"price":"4190000","priceCurrency":"VND"},'
+            '{"price":"5500000","priceType":"https://schema.org/ListPrice"}'
+            ']}'
+        )
+        assert _extract_from_json_ld(html) == 4190000.0
+
+    def test_price_specification_prefers_non_list_price(self):
+        """ListPrice entry must be skipped when a regular price exists."""
+        html = _json_ld(
+            '{"@type":"Product","priceSpecification":['
+            '{"price":"5500000","priceType":"https://schema.org/ListPrice"},'
+            '{"price":"4300000","priceCurrency":"VND"}'
+            ']}'
+        )
+        assert _extract_from_json_ld(html) == 4300000.0
+
+    def test_price_specification_falls_back_to_list_price(self):
+        """If all entries have a priceType, return the first parseable one."""
+        html = _json_ld(
+            '{"@type":"Product","priceSpecification":['
+            '{"price":"5500000","priceType":"https://schema.org/ListPrice"}'
+            ']}'
+        )
+        assert _extract_from_json_ld(html) == 5500000.0
+
+    def test_price_specification_single_dict(self):
+        html = _json_ld('{"@type":"Product","priceSpecification":{"price":"3990000"}}')
+        assert _extract_from_json_ld(html) == 3990000.0
+
+    def test_price_specification_woocommerce_pattern(self):
+        """dienmaytamanh.vn: priceSpecification with VND currency."""
+        html = _json_ld(
+            '{"@type":"Product","priceSpecification":['
+            '{"price":"4300000","priceCurrency":"VND"},'
+            '{"price":"5250000","priceType":"https://schema.org/ListPrice"}'
+            ']}'
+        )
+        assert _extract_from_json_ld(html) == 4300000.0
 
 
 # ── extract_price_auto ─────────────────────────────────────────────────────────
@@ -108,6 +153,42 @@ class TestExtractPriceAuto:
         # Should return None, never raise
         result = extract_price_auto("<<<not html>>>", URL)
         assert result is None
+
+    def test_detects_via_price_ins_span_woocommerce(self):
+        """dienmaytamanh.vn: WooCommerce .price ins span (sale price only)."""
+        html = _page(
+            '<p class="price">'
+            '<del><span>5.250.000₫</span></del>'
+            '<ins><span>4.300.000₫</span></ins>'
+            '</p>'
+        )
+        assert extract_price_auto(html, URL) == 4300000.0
+
+    def test_detects_via_item_price(self):
+        """muahangtaikho.vn: .item-price selector."""
+        html = _page('<p class="item-price">4.150.000đ</p>')
+        assert extract_price_auto(html, URL) == 4150000.0
+
+    def test_detects_via_price_main_bem(self):
+        """dienmayan.vn: BEM class containing 'price__main__1'."""
+        html = _page(
+            '<span class="w66-productdetail__anhgia__two__price__main__1">'
+            '15.990.000đ'
+            '</span>'
+        )
+        assert extract_price_auto(html, URL) == 15990000.0
+
+    def test_price_ins_span_takes_priority_over_plain_price(self):
+        """WooCommerce: .price ins span must win over generic .price container."""
+        html = _page(
+            '<p class="price">'
+            '<del><span>5.250.000₫</span></del>'
+            '<ins><span>4.300.000₫</span></ins>'
+            '</p>'
+        )
+        result = extract_price_auto(html, URL)
+        # Must be the sale price, not the garbled "5.250.0004.300.000" from .price
+        assert result == 4300000.0
 
 
 # ── CrawlJob selectors=None integration check ─────────────────────────────────
