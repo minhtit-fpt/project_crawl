@@ -165,7 +165,7 @@ def _extract_from_json_ld(html: str) -> Optional[float]:
                 except ValueError:
                     pass
 
-            # schema.org Product → offers → price
+            # schema.org Product → offers → price / priceSpecification
             offers = item.get("offers")
             if isinstance(offers, dict):
                 offers = [offers]
@@ -173,12 +173,17 @@ def _extract_from_json_ld(html: str) -> Optional[float]:
                 for offer in offers:
                     if not isinstance(offer, dict):
                         continue
+                    # Direct price on offer
                     price_raw = offer.get("price")
                     if price_raw is not None:
                         try:
                             return _parse_price_text(str(price_raw))
                         except ValueError:
                             pass
+                    # priceSpecification inside offer (dienmaytamanh.vn pattern)
+                    price = _extract_from_price_specification(offer.get("priceSpecification"))
+                    if price is not None:
+                        return price
 
             # schema.org priceSpecification (used by dieuhoa.vip, dienmaytamanh.vn)
             price = _extract_from_price_specification(item.get("priceSpecification"))

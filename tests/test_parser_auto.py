@@ -100,6 +100,26 @@ class TestExtractFromJsonLd:
         )
         assert _extract_from_json_ld(html) == 4300000.0
 
+    def test_price_specification_inside_offers(self):
+        """dienmaytamanh.vn actual pattern: priceSpecification nested inside offers."""
+        html = _json_ld(
+            '{"@type":"Product","offers":[{"@type":"Offer","priceSpecification":['
+            '{"price":"4300000","priceCurrency":"VND","priceType":"https://schema.org/SalePrice"},'
+            '{"price":"5250000","priceCurrency":"VND","priceType":"https://schema.org/ListPrice"}'
+            ']}]}'
+        )
+        assert _extract_from_json_ld(html) == 4300000.0
+
+    def test_price_specification_inside_offers_prefers_sale_price(self):
+        """SalePrice (not ListPrice) must win."""
+        html = _json_ld(
+            '{"@type":"Product","offers":{"@type":"Offer","priceSpecification":['
+            '{"price":"9990000","priceType":"https://schema.org/ListPrice"},'
+            '{"price":"7500000","priceType":"https://schema.org/SalePrice"}'
+            ']}}'
+        )
+        assert _extract_from_json_ld(html) == 7500000.0
+
 
 # ── extract_price_auto ─────────────────────────────────────────────────────────
 
