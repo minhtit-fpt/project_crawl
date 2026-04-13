@@ -29,6 +29,8 @@ class AppConfig:
     proxy_list: list[str]
     log_level: str
     database_url: Optional[str]
+    cms_api_url: Optional[str]
+    cms_api_token: Optional[str]
 
 
 def load_config(env_path: str = ".env") -> AppConfig:
@@ -52,6 +54,8 @@ def load_config(env_path: str = ".env") -> AppConfig:
     proxy_list = _load_proxy_list()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     database_url = os.getenv("DATABASE_URL") or None
+    cms_api_url = os.getenv("CMS_API_URL") or None
+    cms_api_token = os.getenv("CMS_API_TOKEN") or None
 
     return AppConfig(
         aes_secret_key=aes_key,
@@ -59,6 +63,8 @@ def load_config(env_path: str = ".env") -> AppConfig:
         proxy_list=proxy_list,
         log_level=log_level,
         database_url=database_url,
+        cms_api_url=cms_api_url,
+        cms_api_token=cms_api_token,
     )
 
 

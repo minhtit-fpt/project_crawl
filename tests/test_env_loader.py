@@ -69,6 +69,28 @@ class TestLoadConfigSuccess:
         config = _load_with_env({"DATABASE_URL": "postgresql://localhost/db"})
         assert config.database_url == "postgresql://localhost/db"
 
+    def test_cms_api_url_none_when_absent(self):
+        config = _load_with_env()
+        assert config.cms_api_url is None
+
+    def test_cms_api_token_none_when_absent(self):
+        config = _load_with_env()
+        assert config.cms_api_token is None
+
+    def test_cms_api_url_set_when_present(self):
+        config = _load_with_env({"CMS_API_URL": "https://cms.example.com/wp-json/v1/crawler"})
+        assert config.cms_api_url == "https://cms.example.com/wp-json/v1/crawler"
+
+    def test_cms_api_token_set_when_present(self):
+        config = _load_with_env({"CMS_API_TOKEN": "Hoq2yMBjBL5"})
+        assert config.cms_api_token == "Hoq2yMBjBL5"
+
+    def test_cms_api_fields_not_in_required_keys(self):
+        # CMS fields are optional — missing them must NOT raise EnvironmentError
+        config = _load_with_env()
+        assert config.cms_api_url is None
+        assert config.cms_api_token is None
+
 
 class TestLoadConfigMissingKeys:
     def test_missing_aes_key_raises(self):
