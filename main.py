@@ -31,8 +31,9 @@ from scraper.output import print_results
 from scraper.proxy import ProxyManager
 from scraper.rate_limiter import RateLimiter
 from scraper.retry import RetryHandler
-from scraper.scheduler import CrawlJob, CrawlOutcome, Scheduler
+from scraper.scheduler import CrawlJob, CrawlOutcome, CrawlResult, Scheduler
 from scraper.spider import run_spider
+from scraper.storage.database import ResultRepository
 from security.encryption import Encryptor
 from security.env_loader import load_config
 
@@ -57,7 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger = logging.getLogger(__name__)
 
-    # ── Step 3: load crawl targets ─────────────────────────────────────────────
+    # ── Step 3: serve mode — start Pull API and exit ──────────────────────────
+    if args.serve:
+        return _run_api_server(config, logger)
+
+    # ── Step 4: load crawl targets ─────────────────────────────────────────────
     if args.source == "api":
         scheduler = _build_scheduler_from_api(config, logger)
         if scheduler is None:
@@ -97,15 +102,28 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Step 6: run and print results ─────────────────────────────────────────
     logger.info("Starting crawl...")
+    repo = ResultRepository(config.sqlite_db_path)
+    repo.init_schema()
+    run_id = repo.start_run()
+
     try:
         results = scheduler.run(spider_runner)
     except Exception as exc:
         logger.error("Crawl failed unexpectedly: %s", exc, exc_info=True)
         return 1
 
+    # ── Step 7: persist to SQLite ─────────────────────────────────────────────
+    ok_count = sum(1 for r in results if isinstance(r, CrawlResult))
+    error_count = len(results) - ok_count
+    try:
+        repo.save_results(run_id, results)
+        repo.finish_run(run_id, total=len(results), ok=ok_count, errors=error_count)
+        logger.info("Results saved to SQLite (run_id=%s)", run_id)
+    except Exception as exc:
+        logger.warning("Failed to save results to SQLite: %s", exc)
+
     print_results(results, encryptor=encryptor)
 
-    error_count = sum(1 for r in results if r.status != "OK")
     return 0 if error_count == 0 else 2   # 2 = partial errors (not a crash)
 
 
@@ -143,7 +161,54 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Crawl target source: 'api' (default) fetches from CMS API using "
              "CMS_API_URL and CMS_API_TOKEN, 'yaml' reads sites.yaml",
     )
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        default=False,
+        help="Start the Pull API server instead of running a crawl. "
+             "CMS can query GET /prices?sku=X to retrieve stored results.",
+    )
     return parser.parse_args(argv)
+
+
+def _run_api_server(config: object, logger: logging.Logger) -> int:
+    """Start the FastAPI Pull API server (blocking).
+
+    Returns exit code 0 on clean shutdown, 1 on startup failure.
+    """
+    try:
+        import uvicorn
+        from scraper.api_server import create_app
+    except ImportError as exc:
+        logger.error(
+            "Pull API requires 'fastapi' and 'uvicorn'. "
+            "Run: pip install fastapi uvicorn[standard]. Error: %s", exc
+        )
+        return 1
+
+    repo = ResultRepository(config.sqlite_db_path)
+    repo.init_schema()
+
+    crawl_config = {
+        "cms_api_url": config.cms_api_url,
+        "cms_api_token": config.cms_api_token,
+        "proxy_list": config.proxy_list,
+    }
+    app = create_app(
+        repository=repo,
+        api_token=config.pull_api_token,
+        crawl_config=crawl_config,
+    )
+    logger.info(
+        "Starting Pull API on http://%s:%d",
+        config.pull_api_host,
+        config.pull_api_port,
+    )
+    logger.info("  GET  /prices?sku=SKU001     — query prices")
+    logger.info("  POST /crawl/trigger         — trigger a new crawl")
+    logger.info("  GET  /crawl/status/current  — check crawl progress")
+    uvicorn.run(app, host=config.pull_api_host, port=config.pull_api_port)
+    return 0
 
 
 def _build_scheduler_from_api(config: object, logger: logging.Logger) -> Scheduler | None:
