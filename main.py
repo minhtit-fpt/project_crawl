@@ -14,7 +14,7 @@ Usage:
     python main.py
     python main.py --config path/to/sites.yaml
     python main.py --source api
-    python main.py --encrypt
+    python main.py --serve
     python main.py --log-level DEBUG
 """
 
@@ -34,7 +34,6 @@ from scraper.retry import RetryHandler
 from scraper.scheduler import CrawlJob, CrawlOutcome, CrawlResult, Scheduler
 from scraper.spider import run_spider
 from scraper.storage.database import ResultRepository
-from security.encryption import Encryptor
 from security.env_loader import load_config
 
 
@@ -81,13 +80,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         scheduler = Scheduler(site_configs)
 
-    # ── Step 4: initialise components ─────────────────────────────────────────
+    # ── Step 5: initialise components ─────────────────────────────────────────
     proxy_manager = ProxyManager(config.proxy_list)
     rate_limiter = RateLimiter()
     retry_handler = RetryHandler(max_retries=3, base_delay=1.0, max_delay=30.0)
-    encryptor = Encryptor(config.aes_secret_key, config.aes_iv) if args.encrypt else None
 
-    # ── Step 5: spider runner (injected into scheduler.run) ──────────────────
+    # ── Step 6: spider runner (injected into scheduler.run) ──────────────────
     def spider_runner(
         jobs: list[CrawlJob],
         result_callback: Callable[[CrawlOutcome], None],
@@ -100,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             retry_handler=retry_handler,
         )
 
-    # ── Step 6: run and print results ─────────────────────────────────────────
+    # ── Step 7: run and print results ─────────────────────────────────────────
     logger.info("Starting crawl...")
     repo = ResultRepository(config.sqlite_db_path)
     repo.init_schema()
@@ -112,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Crawl failed unexpectedly: %s", exc, exc_info=True)
         return 1
 
-    # ── Step 7: persist to SQLite ─────────────────────────────────────────────
+    # ── Step 8: persist to SQLite ─────────────────────────────────────────────
     ok_count = sum(1 for r in results if isinstance(r, CrawlResult))
     error_count = len(results) - ok_count
     try:
@@ -122,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         logger.warning("Failed to save results to SQLite: %s", exc)
 
-    print_results(results, encryptor=encryptor)
+    print_results(results)
 
     return 0 if error_count == 0 else 2   # 2 = partial errors (not a crash)
 
@@ -139,12 +137,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         metavar="PATH",
         help="Path to sites.yaml (default: scraper/config/sites.yaml)",
-    )
-    parser.add_argument(
-        "--encrypt",
-        action="store_true",
-        default=False,
-        help="Encrypt SKU and Price columns in terminal output using AES-256",
     )
     parser.add_argument(
         "--log-level",

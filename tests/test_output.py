@@ -2,17 +2,13 @@
 
 import io
 from datetime import datetime, timezone
-import pytest
 
 from scraper.output import print_results, format_results, _format_row, _fmt_timestamp
 from scraper.scheduler import CrawlResult, ErrorResult
-from security.encryption import Encryptor
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
 _TS = datetime(2026, 4, 10, 9, 0, 0, tzinfo=timezone.utc)
-_KEY = bytes.fromhex("a" * 64)
-_IV  = bytes.fromhex("b" * 32)
 
 
 def _ok(sku="SKU-001", price=99.99, source="TestShop") -> CrawlResult:
@@ -86,7 +82,6 @@ class TestPrintResults:
     def test_separator_line_present(self):
         buf = io.StringIO()
         print_results([_ok()], file=buf)
-        # Separator is a line of dashes
         assert "---" in buf.getvalue()
 
 
@@ -102,54 +97,28 @@ class TestFormatResults:
         assert "MYSKU" in result
 
 
-# ── Encryption integration ─────────────────────────────────────────────────────
-
-class TestPrintResultsWithEncryption:
-    def test_sku_is_encrypted_not_plain(self):
-        enc = Encryptor(_KEY, _IV)
-        buf = io.StringIO()
-        print_results([_ok(sku="SKU-SECRET")], encryptor=enc, file=buf)
-        output = buf.getvalue()
-        # Plain SKU should NOT appear
-        assert "SKU-SECRET" not in output
-
-    def test_price_is_encrypted_not_plain(self):
-        enc = Encryptor(_KEY, _IV)
-        buf = io.StringIO()
-        print_results([_ok(price=9999.99)], encryptor=enc, file=buf)
-        output = buf.getvalue()
-        assert "9999.99" not in output
-
-    def test_error_price_dash_not_encrypted(self):
-        enc = Encryptor(_KEY, _IV)
-        buf = io.StringIO()
-        print_results([_err()], encryptor=enc, file=buf)
-        # Error rows still show "—" (no price to encrypt)
-        assert "—" in buf.getvalue()
-
-
 # ── _format_row ────────────────────────────────────────────────────────────────
 
 class TestFormatRow:
     def test_ok_row_has_five_columns(self):
-        row = _format_row(_ok(), encryptor=None)
+        row = _format_row(_ok())
         assert len(row) == 5
 
     def test_ok_row_status_is_ok(self):
-        row = _format_row(_ok(), encryptor=None)
+        row = _format_row(_ok())
         assert row[4] == "OK"
 
     def test_ok_row_price_formatted_to_2dp(self):
-        row = _format_row(_ok(price=5.0), encryptor=None)
+        row = _format_row(_ok(price=5.0))
         assert row[1] == "5.00"
 
     def test_error_row_status_contains_error(self):
-        row = _format_row(_err(error="connection refused"), encryptor=None)
+        row = _format_row(_err(error="connection refused"))
         assert "Error" in row[4]
         assert "connection refused" in row[4]
 
     def test_error_row_price_is_dash(self):
-        row = _format_row(_err(), encryptor=None)
+        row = _format_row(_err())
         assert row[1] == "—"
 
 

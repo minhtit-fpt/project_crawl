@@ -6,17 +6,11 @@ from unittest.mock import patch
 
 from security.env_loader import load_config, AppConfig
 
-VALID_KEY_HEX = "a" * 64   # 32 bytes
-VALID_IV_HEX  = "b" * 32   # 16 bytes
-
-VALID_ENV = {
-    "AES_SECRET_KEY": VALID_KEY_HEX,
-    "AES_IV": VALID_IV_HEX,
-}
+VALID_ENV: dict[str, str] = {}   # no required keys anymore
 
 
 def _load_with_env(extra: dict | None = None) -> AppConfig:
-    env = {**VALID_ENV, **(extra or {})}
+    env = {**(extra or {})}
     with patch.dict(os.environ, env, clear=True):
         return load_config(env_path=".env.nonexistent")
 
@@ -25,16 +19,6 @@ class TestLoadConfigSuccess:
     def test_returns_app_config(self):
         config = _load_with_env()
         assert isinstance(config, AppConfig)
-
-    def test_aes_key_decoded_correctly(self):
-        config = _load_with_env()
-        assert config.aes_secret_key == bytes.fromhex(VALID_KEY_HEX)
-        assert len(config.aes_secret_key) == 32
-
-    def test_aes_iv_decoded_correctly(self):
-        config = _load_with_env()
-        assert config.aes_iv == bytes.fromhex(VALID_IV_HEX)
-        assert len(config.aes_iv) == 16
 
     def test_config_is_frozen(self):
         config = _load_with_env()
@@ -85,46 +69,47 @@ class TestLoadConfigSuccess:
         config = _load_with_env({"CMS_API_TOKEN": "Hoq2yMBjBL5"})
         assert config.cms_api_token == "Hoq2yMBjBL5"
 
-    def test_cms_api_fields_not_in_required_keys(self):
-        # CMS fields are optional — missing them must NOT raise EnvironmentError
+    def test_sqlite_db_path_default(self):
         config = _load_with_env()
-        assert config.cms_api_url is None
-        assert config.cms_api_token is None
+        assert config.sqlite_db_path == "data/crawl_results.db"
+
+    def test_sqlite_db_path_custom(self):
+        config = _load_with_env({"SQLITE_DB_PATH": "/tmp/test.db"})
+        assert config.sqlite_db_path == "/tmp/test.db"
+
+    def test_pull_api_host_default(self):
+        config = _load_with_env()
+        assert config.pull_api_host == "0.0.0.0"
+
+    def test_pull_api_port_default(self):
+        config = _load_with_env()
+        assert config.pull_api_port == 8080
+
+    def test_pull_api_port_custom(self):
+        config = _load_with_env({"PULL_API_PORT": "9090"})
+        assert config.pull_api_port == 9090
+
+    def test_pull_api_token_none_when_absent(self):
+        config = _load_with_env()
+        assert config.pull_api_token is None
+
+    def test_pull_api_token_set_when_present(self):
+        config = _load_with_env({"PULL_API_TOKEN": "mysecret"})
+        assert config.pull_api_token == "mysecret"
 
 
-class TestLoadConfigMissingKeys:
-    def test_missing_aes_key_raises(self):
-        with patch.dict(os.environ, {"AES_IV": VALID_IV_HEX}, clear=True):
-            with pytest.raises(EnvironmentError, match="AES_SECRET_KEY"):
+class TestLoadConfigPortValidation:
+    def test_non_integer_port_raises(self):
+        with patch.dict(os.environ, {"PULL_API_PORT": "abc"}, clear=True):
+            with pytest.raises(EnvironmentError, match="integer"):
                 load_config(env_path=".env.nonexistent")
 
-    def test_missing_aes_iv_raises(self):
-        with patch.dict(os.environ, {"AES_SECRET_KEY": VALID_KEY_HEX}, clear=True):
-            with pytest.raises(EnvironmentError, match="AES_IV"):
+    def test_port_zero_raises(self):
+        with patch.dict(os.environ, {"PULL_API_PORT": "0"}, clear=True):
+            with pytest.raises(EnvironmentError, match="65535"):
                 load_config(env_path=".env.nonexistent")
 
-    def test_missing_both_raises(self):
-        with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(EnvironmentError):
-                load_config(env_path=".env.nonexistent")
-
-
-class TestLoadConfigInvalidHex:
-    def test_non_hex_key_raises(self):
-        with patch.dict(os.environ, {**VALID_ENV, "AES_SECRET_KEY": "not-hex!"}, clear=True):
-            with pytest.raises(EnvironmentError, match="not valid hex"):
-                load_config(env_path=".env.nonexistent")
-
-    def test_key_wrong_length_raises(self):
-        # 30 bytes (60 hex chars) instead of 32
-        short_key = "a" * 60
-        with patch.dict(os.environ, {**VALID_ENV, "AES_SECRET_KEY": short_key}, clear=True):
-            with pytest.raises(EnvironmentError, match="32 bytes"):
-                load_config(env_path=".env.nonexistent")
-
-    def test_iv_wrong_length_raises(self):
-        # 8 bytes (16 hex chars) instead of 16
-        short_iv = "b" * 16
-        with patch.dict(os.environ, {**VALID_ENV, "AES_IV": short_iv}, clear=True):
-            with pytest.raises(EnvironmentError, match="16 bytes"):
+    def test_port_too_large_raises(self):
+        with patch.dict(os.environ, {"PULL_API_PORT": "99999"}, clear=True):
+            with pytest.raises(EnvironmentError, match="65535"):
                 load_config(env_path=".env.nonexistent")

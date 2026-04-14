@@ -1,7 +1,6 @@
 """Tests for main.py — CLI wiring, argument parsing, and integration flow."""
 
 import os
-import sys
 import textwrap
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,16 +9,7 @@ import pytest
 
 from main import main, _parse_args
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-VALID_KEY_HEX = "a" * 64
-VALID_IV_HEX  = "b" * 32
-
-VALID_ENV = {
-    "AES_SECRET_KEY": VALID_KEY_HEX,
-    "AES_IV": VALID_IV_HEX,
-}
+VALID_ENV: dict[str, str] = {}   # no required env vars anymore
 
 
 def _make_sites_yaml(tmp_path: Path) -> str:
@@ -46,9 +36,9 @@ class TestParseArgs:
     def test_defaults(self):
         args = _parse_args([])
         assert args.config is None
-        assert args.encrypt is False
         assert args.log_level is None
         assert args.source == "api"
+        assert args.serve is False
 
     def test_source_api_flag(self):
         args = _parse_args(["--source", "api"])
@@ -66,10 +56,6 @@ class TestParseArgs:
         args = _parse_args(["--config", "path/to/sites.yaml"])
         assert args.config == "path/to/sites.yaml"
 
-    def test_encrypt_flag(self):
-        args = _parse_args(["--encrypt"])
-        assert args.encrypt is True
-
     def test_log_level_flag(self):
         args = _parse_args(["--log-level", "DEBUG"])
         assert args.log_level == "DEBUG"
@@ -78,18 +64,16 @@ class TestParseArgs:
         with pytest.raises(SystemExit):
             _parse_args(["--log-level", "VERBOSE"])
 
+    def test_serve_flag(self):
+        args = _parse_args(["--serve"])
+        assert args.serve is True
+
 
 # ── main() — env errors ────────────────────────────────────────────────────────
 
 class TestMainEnvErrors:
-    def test_missing_env_returns_exit_code_1(self, tmp_path):
-        with patch.dict(os.environ, {}, clear=True):
-            code = main(["--config", str(tmp_path / "nonexistent.yaml")])
-        assert code == 1
-
     def test_missing_env_prints_error_to_stderr(self, capsys):
-        # Patch load_config directly so .env file on disk does not interfere
-        with patch("main.load_config", side_effect=EnvironmentError("Missing AES_SECRET_KEY")):
+        with patch("main.load_config", side_effect=EnvironmentError("bad config")):
             main([])
         captured = capsys.readouterr()
         assert "ERROR" in captured.err
@@ -113,21 +97,12 @@ class TestMainSuccess:
 
         config_path = _make_sites_yaml(tmp_path)
 
-        def fake_spider_runner(jobs, callback):
-            for job in jobs:
-                callback(make_crawl_result(sku=job.sku, price=99.9, source=job.site_name))
-
         with patch.dict(os.environ, VALID_ENV, clear=True):
-            with patch("main.run_spider"):
-                # Patch spider_runner inside main via Scheduler.run
-                with patch("main.Scheduler.run", side_effect=lambda runner: fake_spider_runner(
-                    # build_jobs is called inside run, so delegate properly
-                    [MagicMock(sku="SKU-001", site_name="TestShop")],
-                    lambda r: None,
-                ) or [make_crawl_result("SKU-001", 99.9, "TestShop")]):
-                    code = main(["--source", "yaml", "--config", config_path])
+            with patch("main.Scheduler.run", return_value=[
+                make_crawl_result("SKU-001", 99.9, "TestShop")
+            ]):
+                code = main(["--source", "yaml", "--config", config_path])
 
-        # Code should be 0 or 2 (not 1 which means crash)
         assert code in (0, 2)
 
     def test_returns_2_when_some_errors(self, tmp_path):
@@ -144,34 +119,6 @@ class TestMainSuccess:
                 code = main(["--source", "yaml", "--config", config_path])
 
         assert code == 2
-
-    def test_no_encrypt_by_default(self, tmp_path):
-        """Without --encrypt, Encryptor should NOT be passed to print_results."""
-        from scraper.scheduler import make_crawl_result
-
-        config_path = _make_sites_yaml(tmp_path)
-
-        with patch.dict(os.environ, VALID_ENV, clear=True):
-            with patch("main.Scheduler.run") as mock_run:
-                mock_run.return_value = [make_crawl_result("SKU-001", 10.0, "S")]
-                with patch("main.print_results") as mock_print:
-                    main(["--source", "yaml", "--config", config_path])
-                    _, kwargs = mock_print.call_args
-                    assert kwargs.get("encryptor") is None
-
-    def test_encrypt_flag_passes_encryptor(self, tmp_path):
-        """With --encrypt, Encryptor should be passed to print_results."""
-        from scraper.scheduler import make_crawl_result
-
-        config_path = _make_sites_yaml(tmp_path)
-
-        with patch.dict(os.environ, VALID_ENV, clear=True):
-            with patch("main.Scheduler.run") as mock_run:
-                mock_run.return_value = [make_crawl_result("SKU-001", 10.0, "S")]
-                with patch("main.print_results") as mock_print:
-                    main(["--source", "yaml", "--config", config_path, "--encrypt"])
-                    _, kwargs = mock_print.call_args
-                    assert kwargs.get("encryptor") is not None
 
 
 # ── main() — unexpected crawl error ───────────────────────────────────────────
@@ -190,28 +137,23 @@ class TestMainCrawlError:
 # ── main() — --source api ──────────────────────────────────────────────────────
 
 VALID_ENV_WITH_API = {
-    **VALID_ENV,
     "CMS_API_URL": "https://cms.example.com/wp-json/v1/crawler",
     "CMS_API_TOKEN": "test-token-xyz",
 }
 
 
 class TestMainSourceApi:
-    def test_missing_cms_token_returns_1(self, tmp_path):
-        """--source api without CMS_API_TOKEN in env → exit code 1."""
-        with patch.dict(os.environ, VALID_ENV, clear=True):
+    def test_missing_cms_token_returns_1(self):
+        with patch.dict(os.environ, {}, clear=True):
             code = main(["--source", "api"])
         assert code == 1
 
-    def test_missing_cms_url_returns_1(self, tmp_path):
-        """--source api without CMS_API_URL in env → exit code 1."""
-        env = {**VALID_ENV, "CMS_API_TOKEN": "tok"}
-        with patch.dict(os.environ, env, clear=True):
+    def test_missing_cms_url_returns_1(self):
+        with patch.dict(os.environ, {"CMS_API_TOKEN": "tok"}, clear=True):
             code = main(["--source", "api"])
         assert code == 1
 
     def test_api_source_error_returns_1(self):
-        """ApiSourceError during fetch → exit code 1."""
         from scraper.config.api_source import ApiSourceError
 
         with patch.dict(os.environ, VALID_ENV_WITH_API, clear=True):
@@ -220,7 +162,6 @@ class TestMainSourceApi:
         assert code == 1
 
     def test_successful_api_run_returns_0(self):
-        """Happy path: API returns products, spider succeeds → exit code 0."""
         from scraper.config.api_source import ApiProduct
         from scraper.scheduler import make_crawl_result
 
@@ -234,8 +175,7 @@ class TestMainSourceApi:
 
         assert code == 0
 
-    def test_api_mode_does_not_load_yaml(self, tmp_path):
-        """--source api must not call load_sites()."""
+    def test_api_mode_does_not_load_yaml(self):
         from scraper.config.api_source import ApiProduct
         from scraper.scheduler import make_crawl_result
 
@@ -249,7 +189,6 @@ class TestMainSourceApi:
                         mock_load_sites.assert_not_called()
 
     def test_yaml_mode_does_not_call_api(self, tmp_path):
-        """--source yaml must not call fetch_products()."""
         config_path = _make_sites_yaml(tmp_path)
         from scraper.scheduler import make_crawl_result
 
