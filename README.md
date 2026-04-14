@@ -1,6 +1,11 @@
 # Price Crawler
 
-Công cụ thu thập giá sản phẩm từ các trang web thương mại điện tử. Nhận vào danh sách URL và mã SKU, trích xuất giá bằng **Scrapy + Playwright**, và in kết quả ra terminal dạng bảng có cấu trúc. Mọi lỗi đều được ghi nhận thành `Error` record — crawler không bao giờ crash giữa chừng.
+Công cụ thu thập giá sản phẩm từ các trang web thương mại điện tử. Hỗ trợ hai chế độ hoạt động:
+
+1. **CLI Mode** — Nhận vào danh sách URL và mã SKU (từ YAML hoặc CMS API), trích xuất giá bằng **Scrapy + Playwright**, in kết quả ra terminal và lưu vào SQLite.
+2. **Pull API Server** — Chạy FastAPI server để CMS có thể query giá đã crawl hoặc trigger crawl mới mà không cần vào server.
+
+Mọi lỗi đều được ghi nhận thành `Error` record — crawler không bao giờ crash giữa chừng. Kết quả crawl được lưu vào SQLite để Pull API có thể truy cập.
 
 ---
 
@@ -8,8 +13,10 @@ Công cụ thu thập giá sản phẩm từ các trang web thương mại đi�
 
 - [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
 - [Cài đặt](#cài-đặt)
+- [Biến môi trường](#biến-môi-trường)
+- [Chế độ CLI — Chạy crawl](#chế-độ-cli--chạy-crawl)
+- [Chế độ Server — Pull API](#chế-độ-server--pull-api)
 - [Cấu hình](#cấu-hình)
-- [Chạy crawler](#chạy-crawler)
 - [Kết quả đầu ra](#kết-quả-đầu-ra)
 - [Mã thoát](#mã-thoát)
 - [Docker](#docker)
@@ -33,7 +40,7 @@ Công cụ thu thập giá sản phẩm từ các trang web thương mại đi�
 ```bash
 # 1. Clone repo
 git clone <repo-url>
-cd project_claw
+cd project_crawl
 
 # 2. Cài dependencies
 pip install -r requirements.txt
@@ -45,29 +52,42 @@ playwright install chromium
 cp .env.example .env
 ```
 
-Mở `.env` và điền các giá trị cần thiết:
+Mở `.env` và điền các giá trị cần thiết dựa trên chế độ sử dụng.
 
-```bash
-# Tạo AES_SECRET_KEY (32 bytes)
-python -c "import secrets; print(secrets.token_hex(32))"
+## Biến môi trường
 
-# Tạo AES_IV (16 bytes)
-python -c "import secrets; print(secrets.token_hex(16))"
-```
-
-### Biến môi trường
+### Chế độ CLI (--source yaml | --source api)
 
 | Biến             | Bắt buộc | Mô tả |
 |------------------|----------|-------|
-| `AES_SECRET_KEY` | Có       | Khóa AES-256-CBC — 32 bytes, encode hex |
-| `AES_IV`         | Có       | IV cho AES — 16 bytes, encode hex |
 | `PROXY_LIST`     | Không    | Danh sách proxy, ngăn cách bằng dấu phẩy |
 | `LOG_LEVEL`      | Không    | `DEBUG` / `INFO` / `WARNING` / `ERROR` (mặc định: `INFO`) |
-| `DATABASE_URL`   | Không    | URL database (dành cho tính năng lưu trữ sau này) |
+| `SQLITE_DB_PATH` | Không    | Đường dẫn SQLite database (mặc định: `data/crawl_results.db`) |
+
+### API Source Mode (--source api)
+
+Khi sử dụng `--source api`, các biến này là **bắt buộc**:
+
+| Biến             | Mô tả |
+|------------------|-------|
+| `CMS_API_URL`    | Endpoint API của CMS để fetch danh sách sản phẩm (ví dụ: `https://cms.example.com/api/products`) |
+| `CMS_API_TOKEN`  | Auth token gửi kèm request đến CMS API |
+
+### Pull API Server Mode (--serve)
+
+Khi chạy Pull API server, các biến này điều khiển server:
+
+| Biến             | Mô tả | Mặc định |
+|------------------|-------|----------|
+| `PULL_API_HOST`  | Host bind cho API server | `0.0.0.0` |
+| `PULL_API_PORT`  | Port cho API server | `8080` |
+| `PULL_API_TOKEN` | Bearer token yêu cầu cho tất cả requests (để trống để skip auth — dev mode) | (trống) |
 
 ---
 
 ## Cấu hình
+
+### Mode YAML (--source yaml)
 
 Danh sách trang web được cấu hình tại `scraper/config/sites.yaml`. Thêm trang web mới chỉ cần chỉnh sửa file này — không cần thay đổi code.
 
@@ -87,30 +107,112 @@ sites:
 
 **`requires_js: true`** — bật khi trang dùng JavaScript để render giá (React, Vue, Angular...).
 
+### Mode API (--source api)
+
+Crawler fetch danh sách sản phẩm từ CMS API thay vì yaml. CMS API phải trả về danh sách sản phẩm với cấu trúc:
+
+```json
+{
+  "products": [
+    {
+      "sku": "SKU-001",
+      "url": "https://example.com/product/SKU-001",
+      "site_name": "ExampleStore",
+      "selectors": {
+        "price_css": "span.price",
+        "price_xpath": "//span[@class='price']"
+      },
+      "requires_js": false,
+      "rate_limit_seconds": 2
+    }
+  ]
+}
+```
+
 ---
 
-## Chạy crawler
+## Chế độ CLI — Chạy crawl
 
 ```bash
-# Chạy với cấu hình mặc định
-python main.py
+# Chạy từ CMS API (mặc định)
+python main.py --source api
 
-# Dùng file cấu hình khác
-python main.py --config /path/to/sites.yaml
+# Chạy từ YAML
+python main.py --source yaml
 
-# Mã hóa cột SKU và Price trong output (AES-256)
-python main.py --encrypt
+# Dùng file cấu hình YAML khác
+python main.py --source yaml --config /path/to/sites.yaml
 
 # Ghi đè log level
 python main.py --log-level DEBUG
 
 # Kết hợp
-python main.py --config sites_prod.yaml --encrypt --log-level WARNING
+python main.py --source yaml --config sites_prod.yaml --log-level WARNING
+```
+
+---
+
+## Chế độ Server — Pull API
+
+Khởi động Pull API server để CMS có thể query giá hoặc trigger crawl:
+
+```bash
+# Khởi động server trên http://0.0.0.0:8080 (default)
+python main.py --serve
+
+# Custom host/port (qua .env)
+# Chỉnh sửa PULL_API_HOST và PULL_API_PORT trong .env rồi chạy:
+python main.py --serve
+```
+
+### Pull API Endpoints
+
+| Method | Endpoint | Mô tả |
+|--------|----------|-------|
+| `GET` | `/health` | Liveness check |
+| `GET` | `/prices?sku=SKU001` | Lấy giá đã crawl cho một SKU (mới nhất trước) |
+| `GET` | `/prices?sku=SKU001&limit=N` | Giống trên, limit kết quả (max 200) |
+| `POST` | `/crawl/trigger` | Trigger crawl mới (async, trả về run_id) |
+| `GET` | `/crawl/status/{run_id}` | Kiểm tra trạng thái crawl run |
+
+### Authentication
+
+Nếu `PULL_API_TOKEN` được set trong `.env`, tất cả requests phải kèm header:
+
+```
+Authorization: Bearer <PULL_API_TOKEN>
+```
+
+Nếu `PULL_API_TOKEN` trống, không cần auth (dev mode — cảnh báo sẽ được ghi log).
+
+### Response Format (GET /prices)
+
+```json
+{
+  "status": "ok",
+  "sku": "SKU001",
+  "data": [
+    {
+      "price": 1299000.0,
+      "source": "dienmayxanh.com",
+      "crawled_at": "2026-04-13T10:30:15.123456Z",
+      "status": "OK",
+      "error": null,
+      "run_id": "2026-04-13T10:30:00.000001Z"
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "limit": 50
+  }
+}
 ```
 
 ---
 
 ## Kết quả đầu ra
+
+Sau crawl xong, kết quả được in ra terminal dạng bảng:
 
 ```
 SKU                   Price            Source                Timestamp (UTC)            Status
@@ -126,11 +228,11 @@ Total: 3  |  OK: 2  |  Errors: 1
 |-----|-------|
 | `SKU` | Mã sản phẩm |
 | `Price` | Giá trích xuất (float). `—` nếu lỗi |
-| `Source` | Tên site trong `sites.yaml` |
+| `Source` | Tên site |
 | `Timestamp (UTC)` | Thời điểm crawl |
 | `Status` | `OK` hoặc `Error: <chi tiết>` |
 
-Khi bật `--encrypt`, cột `SKU` và `Price` hiển thị giá trị mã hóa AES-256-CBC (base64).
+**Lưu trữ:** Tất cả kết quả crawl cũng được lưu vào SQLite database (`SQLITE_DB_PATH`) để Pull API có thể truy cập.
 
 ---
 
@@ -198,18 +300,25 @@ pytest tests/test_parser.py::test_price_with_currency_symbol
 ## FAQ
 
 **Lỗi `EnvironmentError: Missing required keys` khi khởi động?**
-Kiểm tra file `.env` đã điền đủ `AES_SECRET_KEY` và `AES_IV`.
+- Chế độ API (`--source api`): Kiểm tra `CMS_API_URL` và `CMS_API_TOKEN` trong `.env`
+- Chế độ YAML (`--source yaml`): Kiểm tra file `sites.yaml` tồn tại
 
 **Giá không lấy được (`Error: parse failed`)?**
 1. Verify selector bằng DevTools của trình duyệt
-2. Nếu trang dùng JS để render giá → đặt `requires_js: true`
+2. Nếu trang dùng JS để render giá → đặt `requires_js: true` (YAML) hoặc cập nhật CMS API response
 3. Chạy `--log-level DEBUG` để xem HTML response
 
 **Muốn lưu kết quả ra file?**
 ```bash
-python main.py > results.txt 2>&1
+python main.py --source yaml > results.txt 2>&1
 ```
 
 **Crawler quá chậm?**
-- Giảm `rate_limit_seconds` trong `sites.yaml` (cẩn thận bị block)
+- Giảm `rate_limit_seconds` trong cấu hình (cẩn thận bị block)
 - Kiểm tra proxy còn hoạt động không
+
+**Làm sao để Pull API chỉ có thể truy cập từ CMS?**
+Đặt giá trị `PULL_API_TOKEN` trong `.env` (ví dụ: `PULL_API_TOKEN=your-secret-token-here`). CMS phải gửi header `Authorization: Bearer your-secret-token-here` với mỗi request.
+
+**Pull API trigger crawl được chạy nền không?**
+Có, crawl được chạy trong background thread. POST `/crawl/trigger` trả về `run_id` ngay lập tức. Dùng GET `/crawl/status/{run_id}` để kiểm tra tiến độ.
