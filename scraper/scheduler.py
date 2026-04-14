@@ -32,9 +32,9 @@ class CrawlJob:
     site_name: str
     url: str                     # base_url with {sku} already substituted
     sku: str
-    selectors: SelectorConfig
     requires_js: bool
     rate_limit_seconds: float
+    selectors: Optional[SelectorConfig] = None  # None → auto-detect price
 
 
 @dataclass
@@ -66,9 +66,13 @@ CrawlOutcome = CrawlResult | ErrorResult
 class Scheduler:
     """Expands site configs into jobs and orchestrates their execution.
 
-    Usage:
+    Usage (YAML mode):
         scheduler = Scheduler(site_configs)
-        results = scheduler.run()   # blocking
+        results = scheduler.run(spider_runner)   # blocking
+
+    Usage (API mode — pre-built jobs):
+        scheduler = Scheduler.from_jobs(jobs)
+        results = scheduler.run(spider_runner)
     """
 
     def __init__(self, site_configs: list[SiteConfig]) -> None:
@@ -76,6 +80,27 @@ class Scheduler:
             raise ValueError("site_configs must not be empty")
         self._site_configs = site_configs
         self._results: list[CrawlOutcome] = []
+        self._prebuilt_jobs: list[CrawlJob] | None = None
+
+    @classmethod
+    def from_jobs(cls, jobs: list[CrawlJob]) -> "Scheduler":
+        """Create a Scheduler from a pre-built job list (skips build_jobs).
+
+        Used when crawl targets come from an external source (e.g. CMS API)
+        rather than sites.yaml. The instance bypasses SiteConfig expansion
+        and runs the spider directly with the provided jobs.
+
+        Args:
+            jobs: Ready-to-run CrawlJob list (e.g. from build_jobs_from_api).
+
+        Returns:
+            Scheduler instance ready to call .run().
+        """
+        instance = cls.__new__(cls)
+        instance._site_configs = []
+        instance._results = []
+        instance._prebuilt_jobs = jobs
+        return instance
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -110,9 +135,9 @@ class Scheduler:
                         site_name=site.name,
                         url=url,
                         sku=sku,
-                        selectors=site.selectors,
                         requires_js=site.requires_js,
                         rate_limit_seconds=site.rate_limit_seconds,
+                        selectors=site.selectors,
                     )
                 )
 
@@ -140,8 +165,12 @@ class Scheduler:
             List of CrawlResult and ErrorResult objects.
         """
         self._results.clear()
-        jobs, resolve_errors = self.build_jobs()
-        self._results.extend(resolve_errors)  # pre-populate failed resolutions
+
+        if self._prebuilt_jobs is not None:
+            jobs = self._prebuilt_jobs
+        else:
+            jobs, resolve_errors = self.build_jobs()
+            self._results.extend(resolve_errors)  # pre-populate failed resolutions
 
         if not jobs:
             logger.warning("No crawl jobs generated — check sites.yaml SKU lists")

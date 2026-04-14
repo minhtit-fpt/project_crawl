@@ -264,8 +264,8 @@ class TestRunAsync:
     ):
         from scraper.scheduler import CrawlJob
         jobs = [
-            CrawlJob("S1", "https://a.com/1", "A", crawl_job.selectors, False, 0.0),
-            CrawlJob("S2", "https://b.com/2", "B", crawl_job.selectors, False, 0.0),
+            CrawlJob("S1", "https://a.com/1", "A", False, 0.0, crawl_job.selectors),
+            CrawlJob("S2", "https://b.com/2", "B", False, 0.0, crawl_job.selectors),
         ]
         results = []
 
@@ -287,8 +287,8 @@ class TestRunAsync:
         self, crawl_job, proxy_manager, rate_limiter, retry_handler
     ):
         from scraper.scheduler import CrawlJob
-        ok_job = CrawlJob("S1", "https://ok.com/1", "OK", crawl_job.selectors, False, 0.0)
-        bad_job = CrawlJob("S2", "https://bad.com/2", "BAD", crawl_job.selectors, False, 0.0)
+        ok_job = CrawlJob("S1", "https://ok.com/1", "OK", False, 0.0, crawl_job.selectors)
+        bad_job = CrawlJob("S2", "https://bad.com/2", "BAD", False, 0.0, crawl_job.selectors)
 
         ok_page = _mock_page()
         bad_page = _mock_page(status=404)
