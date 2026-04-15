@@ -57,13 +57,16 @@ CREATE TABLE IF NOT EXISTS crawl_results (
     crawled_at   VARCHAR(64) NOT NULL,
     status       VARCHAR(16) NOT NULL,
     error        TEXT,
+    UNIQUE KEY uq_sku_source (sku, source),
     FOREIGN KEY (crawl_run_id) REFERENCES crawl_runs(id)
 );
 """
 
-_CREATE_IDX_SKU = (
-    "CREATE INDEX idx_results_sku ON crawl_results(sku);"
+# For existing tables created before the UNIQUE KEY was added
+_ADD_UQ_SKU_SOURCE = (
+    "ALTER TABLE crawl_results ADD UNIQUE KEY uq_sku_source (sku, source);"
 )
+
 _CREATE_IDX_RUN = (
     "CREATE INDEX idx_results_run ON crawl_results(crawl_run_id);"
 )
@@ -81,7 +84,13 @@ WHERE id = %s;
 
 _INSERT_RESULT = """
 INSERT INTO crawl_results (crawl_run_id, sku, price, source, crawled_at, status, error)
-VALUES (%s, %s, %s, %s, %s, %s, %s);
+VALUES (%s, %s, %s, %s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+    crawl_run_id = VALUES(crawl_run_id),
+    price        = VALUES(price),
+    crawled_at   = VALUES(crawled_at),
+    status       = VALUES(status),
+    error        = VALUES(error);
 """
 
 _SELECT_BY_SKU = """
@@ -116,9 +125,8 @@ class ResultRepository:
             cursor = conn.cursor()
             cursor.execute(_CREATE_RUNS)
             cursor.execute(_CREATE_RESULTS)
-            # MySQL 8.0 does not support IF NOT EXISTS for CREATE INDEX
-            # so we handle the duplicate-key error gracefully.
-            _create_index_if_missing(cursor, _CREATE_IDX_SKU)
+            # Add UNIQUE KEY for existing tables created before this constraint
+            _create_index_if_missing(cursor, _ADD_UQ_SKU_SOURCE)
             _create_index_if_missing(cursor, _CREATE_IDX_RUN)
             cursor.close()
         logger.debug("MySQL schema initialised")
