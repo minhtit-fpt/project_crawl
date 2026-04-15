@@ -28,7 +28,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: runtime
-    image: project_claw:latest
+    image: project_crawl:latest
 
     # Load all secrets from .env — never hardcode them here
     env_file:
@@ -58,6 +58,36 @@ services:
     command: >
       python main.py
       ${CRAWLER_EXTRA_ARGS:-}
+
+  api:
+    image: project_crawl:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./scraper/config:/app/scraper/config:ro
+
+    ports:
+      - "${PULL_API_PORT:-8080}:${PULL_API_PORT:-8080}"
+
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    command: python main.py --serve
 
 volumes:
   mysql_data:
