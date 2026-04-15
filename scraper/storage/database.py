@@ -263,6 +263,13 @@ _TZ_VN = timezone(timedelta(hours=7))
 def _now_iso() -> str:
     return datetime.now(tz=_TZ_VN).strftime("%Y-%m-%dT%H:%M:%S")
 
+def _to_vn_time(dt: datetime) -> str:
+    """Convert a datetime (UTC or naive) to Vietnam time string."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_TZ_VN)
+    else:
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(_TZ_VN)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
     """Convert a CrawlResult or ErrorResult into a DB insert tuple."""
@@ -272,7 +279,7 @@ def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
             outcome.sku,
             outcome.price,
             outcome.source,
-            outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%S"),
+            _to_vn_time(outcome.timestamp),
             "OK",
             None,
         )
@@ -282,7 +289,7 @@ def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
         outcome.sku,
         None,
         outcome.source,
-        outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%S"),
+        _to_vn_time(outcome.timestamp),
         "Error",
         outcome.error,
     )
