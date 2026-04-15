@@ -4,7 +4,7 @@ import os
 import pytest
 from unittest.mock import patch
 
-from security.env_loader import load_config, AppConfig
+from security.env_loader import load_config, AppConfig, _DEFAULT_DATABASE_URL
 
 VALID_ENV: dict[str, str] = {}   # no required keys anymore
 
@@ -45,13 +45,20 @@ class TestLoadConfigSuccess:
         config = _load_with_env({"PROXY_LIST": "http://proxy:3128"})
         assert config.proxy_list == ["http://proxy:3128"]
 
-    def test_database_url_none_when_absent(self):
+    def test_database_url_default(self):
+        """When DATABASE_URL is absent, falls back to the default MySQL URL."""
         config = _load_with_env()
-        assert config.database_url is None
+        assert config.database_url == _DEFAULT_DATABASE_URL
 
-    def test_database_url_set_when_present(self):
-        config = _load_with_env({"DATABASE_URL": "postgresql://localhost/db"})
-        assert config.database_url == "postgresql://localhost/db"
+    def test_database_url_custom_mysql(self):
+        url = "mysql://user:pass@myhost:3306/mydb"
+        config = _load_with_env({"DATABASE_URL": url})
+        assert config.database_url == url
+
+    def test_database_url_mysqlconnector_scheme(self):
+        url = "mysql+mysqlconnector://user:pass@myhost:3306/mydb"
+        config = _load_with_env({"DATABASE_URL": url})
+        assert config.database_url == url
 
     def test_cms_api_url_none_when_absent(self):
         config = _load_with_env()
@@ -68,14 +75,6 @@ class TestLoadConfigSuccess:
     def test_cms_api_token_set_when_present(self):
         config = _load_with_env({"CMS_API_TOKEN": "Hoq2yMBjBL5"})
         assert config.cms_api_token == "Hoq2yMBjBL5"
-
-    def test_sqlite_db_path_default(self):
-        config = _load_with_env()
-        assert config.sqlite_db_path == "data/crawl_results.db"
-
-    def test_sqlite_db_path_custom(self):
-        config = _load_with_env({"SQLITE_DB_PATH": "/tmp/test.db"})
-        assert config.sqlite_db_path == "/tmp/test.db"
 
     def test_pull_api_host_default(self):
         config = _load_with_env()
@@ -96,6 +95,28 @@ class TestLoadConfigSuccess:
     def test_pull_api_token_set_when_present(self):
         config = _load_with_env({"PULL_API_TOKEN": "mysecret"})
         assert config.pull_api_token == "mysecret"
+
+    def test_no_sqlite_db_path_field(self):
+        """AppConfig must no longer have a sqlite_db_path field."""
+        config = _load_with_env()
+        assert not hasattr(config, "sqlite_db_path")
+
+
+class TestDatabaseUrlValidation:
+    def test_invalid_scheme_raises(self):
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://localhost/db"}, clear=True):
+            with pytest.raises(EnvironmentError, match="mysql"):
+                load_config(env_path=".env.nonexistent")
+
+    def test_sqlite_scheme_raises(self):
+        with patch.dict(os.environ, {"DATABASE_URL": "sqlite:///data/test.db"}, clear=True):
+            with pytest.raises(EnvironmentError, match="mysql"):
+                load_config(env_path=".env.nonexistent")
+
+    def test_http_scheme_raises(self):
+        with patch.dict(os.environ, {"DATABASE_URL": "http://localhost/db"}, clear=True):
+            with pytest.raises(EnvironmentError, match="mysql"):
+                load_config(env_path=".env.nonexistent")
 
 
 class TestLoadConfigPortValidation:

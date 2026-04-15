@@ -1,4 +1,4 @@
-"""Tests for scraper.storage.database (ResultRepository)."""
+"""Tests for scraper.storage.database (ResultRepository) — uses MySQL via testcontainers."""
 
 from __future__ import annotations
 
@@ -7,13 +7,8 @@ import pytest
 from scraper.scheduler import make_crawl_result, make_error_result
 from scraper.storage.database import ResultRepository
 
-
-@pytest.fixture
-def repo(tmp_path) -> ResultRepository:
-    """ResultRepository backed by a temp SQLite file."""
-    db = ResultRepository(str(tmp_path / "test.db"))
-    db.init_schema()
-    return db
+# `repo` fixture is provided by tests/conftest.py (testcontainers MySQL)
+pytestmark = pytest.mark.integration
 
 
 # ── init_schema ────────────────────────────────────────────────────────────────
@@ -112,7 +107,7 @@ def test_results_ordered_newest_first(repo):
     repo.save_results(run2, [make_crawl_result("SKU001", 200.0, "site.com")])
 
     rows = repo.get_prices_by_sku("SKU001", limit=10)
-    # Higher autoincrement id (inserted last) comes first when timestamps tie
+    # Higher AUTO_INCREMENT id (inserted last) comes first when timestamps tie
     assert rows[0]["price"] == pytest.approx(200.0)
     assert rows[1]["price"] == pytest.approx(100.0)
 

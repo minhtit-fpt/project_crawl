@@ -42,7 +42,7 @@ def run_crawl(
     proxy_list: list[str],
     repo: ResultRepository,
 ) -> tuple[str, list[CrawlOutcome]]:
-    """Run a full crawl cycle and persist results to SQLite.
+    """Run a full crawl cycle and persist results to database.
 
     Fetches jobs from CMS API, runs the spider, saves outcomes to the
     repository, and returns the run_id with all outcomes.
@@ -54,7 +54,7 @@ def run_crawl(
         repo:          Initialised ResultRepository for persistence.
 
     Returns:
-        (run_id, outcomes) — run_id is the ISO-8601 key stored in SQLite.
+        (run_id, outcomes) — run_id is the ISO-8601 key stored in database.
 
     Raises:
         CrawlError: If credentials are missing or the CMS API is unreachable.
@@ -100,7 +100,7 @@ def run_crawl(
 
     results = scheduler.run(spider_runner)
 
-    # ── 4. Persist to SQLite ───────────────────────────────────────────────────
+    # ── 4. Persist to database ────────────────────────────────────────────────
     ok_count = sum(1 for r in results if isinstance(r, CrawlResult))
     error_count = len(results) - ok_count
 

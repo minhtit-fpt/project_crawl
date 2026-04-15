@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Step 7: run and print results ─────────────────────────────────────────
     logger.info("Starting crawl...")
-    repo = ResultRepository(config.sqlite_db_path)
+    repo = ResultRepository(config.database_url)
     repo.init_schema()
     run_id = repo.start_run()
 
@@ -110,15 +110,15 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Crawl failed unexpectedly: %s", exc, exc_info=True)
         return 1
 
-    # ── Step 8: persist to SQLite ─────────────────────────────────────────────
+    # ── Step 8: persist to database ──────────────────────────────────────────
     ok_count = sum(1 for r in results if isinstance(r, CrawlResult))
     error_count = len(results) - ok_count
     try:
         repo.save_results(run_id, results)
         repo.finish_run(run_id, total=len(results), ok=ok_count, errors=error_count)
-        logger.info("Results saved to SQLite (run_id=%s)", run_id)
+        logger.info("Results saved to database (run_id=%s)", run_id)
     except Exception as exc:
-        logger.warning("Failed to save results to SQLite: %s", exc)
+        logger.warning("Failed to save results to database: %s", exc)
 
     print_results(results)
 
@@ -178,7 +178,7 @@ def _run_api_server(config: object, logger: logging.Logger) -> int:
         )
         return 1
 
-    repo = ResultRepository(config.sqlite_db_path)
+    repo = ResultRepository(config.database_url)
     repo.init_schema()
 
     crawl_config = {

@@ -12,11 +12,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 
-_DEFAULT_SQLITE_PATH = "data/crawl_results.db"
+_DEFAULT_DATABASE_URL = "mysql://crawler:crawler@localhost:3306/price_crawler"
 _DEFAULT_API_HOST = "0.0.0.0"
 _DEFAULT_API_PORT = 8080
 
@@ -25,11 +26,10 @@ _DEFAULT_API_PORT = 8080
 class AppConfig:
     proxy_list: list[str]
     log_level: str
-    database_url: Optional[str]
+    database_url: str
     cms_api_url: Optional[str]
     cms_api_token: Optional[str]
-    # Pull API / local storage
-    sqlite_db_path: str
+    # Pull API
     pull_api_host: str
     pull_api_port: int
     pull_api_token: Optional[str]
@@ -51,10 +51,9 @@ def load_config(env_path: str = ".env") -> AppConfig:
 
     proxy_list = _load_proxy_list()
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    database_url = os.getenv("DATABASE_URL") or None
+    database_url = _load_database_url()
     cms_api_url = os.getenv("CMS_API_URL") or None
     cms_api_token = os.getenv("CMS_API_TOKEN") or None
-    sqlite_db_path = os.getenv("SQLITE_DB_PATH", _DEFAULT_SQLITE_PATH)
     pull_api_host = os.getenv("PULL_API_HOST", _DEFAULT_API_HOST)
     pull_api_port = _load_port("PULL_API_PORT", default=_DEFAULT_API_PORT)
     pull_api_token = os.getenv("PULL_API_TOKEN") or None
@@ -65,7 +64,6 @@ def load_config(env_path: str = ".env") -> AppConfig:
         database_url=database_url,
         cms_api_url=cms_api_url,
         cms_api_token=cms_api_token,
-        sqlite_db_path=sqlite_db_path,
         pull_api_host=pull_api_host,
         pull_api_port=pull_api_port,
         pull_api_token=pull_api_token,
@@ -73,6 +71,34 @@ def load_config(env_path: str = ".env") -> AppConfig:
 
 
 # ── Private helpers ────────────────────────────────────────────────────────────
+
+def _load_database_url() -> str:
+    """Load and validate DATABASE_URL, falling back to default MySQL URL."""
+    raw = os.getenv("DATABASE_URL", "").strip()
+    url = raw if raw else _DEFAULT_DATABASE_URL
+    _validate_database_url(url)
+    return url
+
+
+def _validate_database_url(url: str) -> None:
+    """Ensure DATABASE_URL is a valid MySQL connection string.
+
+    Raises:
+        EnvironmentError: If the URL scheme is not mysql or mysql+mysqlconnector.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        raise EnvironmentError(
+            f"DATABASE_URL is not a valid URL: {url!r}. Error: {exc}"
+        ) from exc
+
+    if parsed.scheme not in ("mysql", "mysql+mysqlconnector"):
+        raise EnvironmentError(
+            f"DATABASE_URL must use scheme 'mysql://' or 'mysql+mysqlconnector://'. "
+            f"Got: {parsed.scheme!r} in {url!r}"
+        )
+
 
 def _load_port(key: str, default: int) -> int:
     raw = os.getenv(key, "").strip()

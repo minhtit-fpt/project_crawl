@@ -1,30 +1,25 @@
-"""Tests for POST /crawl/trigger and GET /crawl/status/current."""
+"""Tests for POST /crawl/trigger and GET /crawl/status/current — uses MySQL via testcontainers."""
 
 from __future__ import annotations
 
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from scraper.api_server import create_app
-from scraper.scheduler import make_crawl_result, make_error_result
+from scraper.scheduler import make_crawl_result
 from scraper.storage.database import ResultRepository
 
+# `repo` fixture is provided by tests/conftest.py (testcontainers MySQL)
+pytestmark = pytest.mark.integration
 
 CRAWL_CONFIG = {
     "cms_api_url": "https://cms.example.com/api/products",
     "cms_api_token": "test-token",
     "proxy_list": [],
 }
-
-
-@pytest.fixture
-def repo(tmp_path) -> ResultRepository:
-    db = ResultRepository(str(tmp_path / "trigger_test.db"))
-    db.init_schema()
-    return db
 
 
 @pytest.fixture
