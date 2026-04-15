@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Generator
 from urllib.parse import urlparse, unquote
 
@@ -257,8 +257,11 @@ def _create_index_if_missing(cursor: mysql.connector.cursor.MySQLCursor, sql: st
             raise
 
 
+_TZ_VN = timezone(timedelta(hours=7))
+
+
 def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(tz=_TZ_VN).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
@@ -269,7 +272,7 @@ def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
             outcome.sku,
             outcome.price,
             outcome.source,
-            outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%S"),
             "OK",
             None,
         )
@@ -279,7 +282,7 @@ def _outcome_to_row(run_id: str, outcome: CrawlOutcome) -> tuple:
         outcome.sku,
         None,
         outcome.source,
-        outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        outcome.timestamp.strftime("%Y-%m-%dT%H:%M:%S"),
         "Error",
         outcome.error,
     )
