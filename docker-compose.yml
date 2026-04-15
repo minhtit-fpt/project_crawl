@@ -1,4 +1,28 @@
 services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-price_crawler}
+      MYSQL_USER: ${MYSQL_USER:-crawler}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-crawler_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root",
+             "-p${MYSQL_ROOT_PASSWORD:-root_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
   crawler:
     build:
       context: .
@@ -21,6 +45,11 @@ services:
           memory: 1g
           cpus: "1.0"
 
+    # Wait until MySQL is healthy before starting the crawler
+    depends_on:
+      mysql:
+        condition: service_healthy
+
     # Restart only on unexpected crashes, not on clean exit
     restart: on-failure
 
@@ -29,3 +58,6 @@ services:
     command: >
       python main.py
       ${CRAWLER_EXTRA_ARGS:-}
+
+volumes:
+  mysql_data:

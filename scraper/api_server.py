@@ -79,7 +79,7 @@ def create_app(
     """Create and configure the FastAPI application.
 
     Args:
-        repository:   Initialised ResultRepository (SQLite).
+        repository:   Initialised ResultRepository.
         api_token:    Optional Bearer token. If None, auth is disabled with a warning.
         crawl_config: Dict with keys ``cms_api_url``, ``cms_api_token``,
                       ``proxy_list`` — required to enable POST /crawl/trigger.

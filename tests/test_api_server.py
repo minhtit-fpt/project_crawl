@@ -1,4 +1,4 @@
-"""Tests for scraper.api_server (FastAPI Pull API)."""
+"""Tests for scraper.api_server (FastAPI Pull API) — uses MySQL via testcontainers."""
 
 from __future__ import annotations
 
@@ -9,15 +9,11 @@ from scraper.api_server import create_app
 from scraper.scheduler import make_crawl_result, make_error_result
 from scraper.storage.database import ResultRepository
 
+# `repo` fixture is provided by tests/conftest.py (testcontainers MySQL)
+pytestmark = pytest.mark.integration
+
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
-
-@pytest.fixture
-def repo(tmp_path) -> ResultRepository:
-    db = ResultRepository(str(tmp_path / "api_test.db"))
-    db.init_schema()
-    return db
-
 
 @pytest.fixture
 def client(repo) -> TestClient:
