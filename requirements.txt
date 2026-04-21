@@ -8,6 +8,7 @@ browserforge>=1.0
 msgspec>=0.18
 parsel>=1.8
 # Pull API
+apscheduler>=3.10
 fastapi>=0.115
 uvicorn[standard]>=0.30
 httpx>=0.27
