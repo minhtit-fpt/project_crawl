@@ -67,7 +67,7 @@ async def _do_fetch(job: CrawlJob, proxy: str | None) -> tuple[int, str]:
             job.url,
             proxy=proxy,
             network_idle=False,   # don't wait for idle — heavy sites never idle
-            timeout=60_000,       # 60s per page (default 30s is too short)
+            timeout=15_000,       # 15s per page
             retries=1,            # Minimum allowed; RetryHandler manages outer retries
             headless=True,
             # NOTE: disable_resources intentionally omitted — some sites (e.g.

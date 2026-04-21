@@ -45,10 +45,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Optional
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -70,6 +73,9 @@ class _RunState:
 
 
 # ── App factory ────────────────────────────────────────────────────────────────
+
+_CRAWL_INTERVAL_HOURS = 2
+
 
 def create_app(
     repository: ResultRepository,
@@ -94,17 +100,61 @@ def create_app(
             "Set PULL_API_TOKEN in .env for production use."
         )
 
+    _config = crawl_config or {}
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):  # noqa: ANN001
+        scheduler = BackgroundScheduler(daemon=True)
+
+        def _scheduled_crawl() -> None:
+            from scraper.crawler import CrawlError, run_crawl
+            cms_url = _config.get("cms_api_url")
+            cms_token = _config.get("cms_api_token")
+            if not cms_url or not cms_token:
+                logger.warning("Scheduled crawl skipped: CMS credentials not configured")
+                return
+            logger.info("Scheduled crawl starting (every %dh)", _CRAWL_INTERVAL_HOURS)
+            try:
+                run_id, _ = run_crawl(
+                    cms_api_url=cms_url,
+                    cms_api_token=cms_token,
+                    proxy_list=_config.get("proxy_list", []),
+                    repo=repository,
+                )
+                logger.info("Scheduled crawl finished (run_id=%s)", run_id)
+            except CrawlError as exc:
+                logger.error("Scheduled crawl failed: %s", exc)
+            except Exception as exc:
+                logger.error("Scheduled crawl unexpected error: %s", exc, exc_info=True)
+
+        scheduler.add_job(
+            _scheduled_crawl,
+            trigger="interval",
+            hours=_CRAWL_INTERVAL_HOURS,
+            id="auto_crawl",
+            next_run_time=datetime.now(),  # chạy ngay khi server start
+        )
+        scheduler.start()
+        logger.info(
+            "Auto-crawl scheduler started — runs every %dh", _CRAWL_INTERVAL_HOURS
+        )
+
+        yield
+
+        scheduler.shutdown(wait=False)
+
     app = FastAPI(
         title="Price Crawler — Pull API",
         description="Query crawled product prices by SKU and trigger crawl runs.",
         version="1.0.0",
+        lifespan=_lifespan,
     )
 
     _register_routes(
         app,
         repository=repository,
         api_token=api_token,
-        crawl_config=crawl_config or {},
+        crawl_config=_config,
     )
 
     return app
