@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from datetime import datetime
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -131,6 +132,7 @@ def create_app(
             trigger="interval",
             hours=_CRAWL_INTERVAL_HOURS,
             id="auto_crawl",
+            next_run_time=datetime.now(),  # chạy ngay khi server start
         )
         scheduler.start()
         logger.info(
